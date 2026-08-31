@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clearActiveParkingSession, getActiveSession } from '@/lib/db';
 import { sendTelegramConfirmation } from '@/lib/telegram';
+import { sendWhatsAppMessage } from '@/lib/whatsapp';
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,9 +9,9 @@ export async function POST(req: NextRequest) {
     await clearActiveParkingSession();
 
     if (active) {
-      sendTelegramConfirmation(`🚗 *Car Moved:* Active parking alert for ${active.corridor} has been cleared.`).catch(
-        (e) => console.error(e)
-      );
+      const msg = `🚗 *Car Moved:* Active parking alert for ${active.corridor} has been cleared.`;
+      sendTelegramConfirmation(msg).catch((e) => console.error(e));
+      sendWhatsAppMessage(msg).catch((e) => console.error(e));
     }
 
     return NextResponse.json({ success: true });

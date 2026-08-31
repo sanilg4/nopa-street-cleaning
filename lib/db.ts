@@ -19,7 +19,11 @@ export interface ParkingSession {
   clearedAt: string | null; // ISO string or null
 }
 
-const LOCAL_STORAGE_PATH = path.join(process.cwd(), 'data', 'parking_session.json');
+// In serverless environments (Netlify / Vercel), /tmp is the only writable directory
+const LOCAL_STORAGE_PATH =
+  process.env.NODE_ENV === 'production'
+    ? '/tmp/parking_session.json'
+    : path.join(process.cwd(), 'data', 'parking_session.json');
 
 function getSupabaseClient() {
   const url = process.env.SUPABASE_URL;
@@ -31,39 +35,41 @@ function getSupabaseClient() {
 export async function getActiveSession(): Promise<ParkingSession | null> {
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { data, error } = await supabase
-      .from('parking_sessions')
-      .select('*')
-      .is('cleared_at', null)
-      .order('parked_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('parking_sessions')
+        .select('*')
+        .is('cleared_at', null)
+        .order('parked_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (error) {
-      console.error('Supabase query error:', error);
-      return null;
+      if (error) {
+        console.error('Supabase query error:', error);
+      } else if (data) {
+        return {
+          id: data.id,
+          segmentId: data.segment_id,
+          corridor: data.corridor,
+          limits: data.limits,
+          side: data.side,
+          weekday: data.weekday,
+          fromHour: data.from_hour,
+          toHour: data.to_hour,
+          sweepingStart: data.sweeping_start,
+          sweepingEnd: data.sweeping_end,
+          alertTime: data.alert_time,
+          alertSent: data.alert_sent,
+          parkedAt: data.parked_at,
+          clearedAt: data.cleared_at,
+        };
+      }
+    } catch (err) {
+      console.error('Supabase exception:', err);
     }
-    if (!data) return null;
-
-    return {
-      id: data.id,
-      segmentId: data.segment_id,
-      corridor: data.corridor,
-      limits: data.limits,
-      side: data.side,
-      weekday: data.weekday,
-      fromHour: data.from_hour,
-      toHour: data.to_hour,
-      sweepingStart: data.sweeping_start,
-      sweepingEnd: data.sweeping_end,
-      alertTime: data.alert_time,
-      alertSent: data.alert_sent,
-      parkedAt: data.parked_at,
-      clearedAt: data.cleared_at,
-    };
   }
 
-  // Fallback to local filesystem storage
+  // Fallback to local filesystem storage (/tmp in production)
   try {
     if (fs.existsSync(LOCAL_STORAGE_PATH)) {
       const content = fs.readFileSync(LOCAL_STORAGE_PATH, 'utf-8');
@@ -91,32 +97,36 @@ export async function saveNewParkingSession(
 
   const supabase = getSupabaseClient();
   if (supabase) {
-    // First, clear any existing active sessions
-    await supabase
-      .from('parking_sessions')
-      .update({ cleared_at: new Date().toISOString() })
-      .is('cleared_at', null);
+    try {
+      // First, clear any existing active sessions
+      await supabase
+        .from('parking_sessions')
+        .update({ cleared_at: new Date().toISOString() })
+        .is('cleared_at', null);
 
-    // Insert new session
-    const { error } = await supabase.from('parking_sessions').insert({
-      id: newSession.id,
-      segment_id: newSession.segmentId,
-      corridor: newSession.corridor,
-      limits: newSession.limits,
-      side: newSession.side,
-      weekday: newSession.weekday,
-      from_hour: newSession.fromHour,
-      to_hour: newSession.toHour,
-      sweeping_start: newSession.sweepingStart,
-      sweeping_end: newSession.sweepingEnd,
-      alert_time: newSession.alertTime,
-      alert_sent: false,
-      parked_at: newSession.parkedAt,
-      cleared_at: null,
-    });
+      // Insert new session
+      const { error } = await supabase.from('parking_sessions').insert({
+        id: newSession.id,
+        segment_id: newSession.segmentId,
+        corridor: newSession.corridor,
+        limits: newSession.limits,
+        side: newSession.side,
+        weekday: newSession.weekday,
+        from_hour: newSession.fromHour,
+        to_hour: newSession.toHour,
+        sweeping_start: newSession.sweepingStart,
+        sweeping_end: newSession.sweepingEnd,
+        alert_time: newSession.alertTime,
+        alert_sent: false,
+        parked_at: newSession.parkedAt,
+        cleared_at: null,
+      });
 
-    if (error) {
-      console.error('Failed to save to Supabase:', error);
+      if (error) {
+        console.error('Failed to save to Supabase:', error);
+      }
+    } catch (err) {
+      console.error('Supabase save error:', err);
     }
   }
 
@@ -131,19 +141,16 @@ export async function saveNewParkingSession(
   return newSession;
 }
 
-export async function clearActiveParkingSession(sessionId?: string): Promise<boolean> {
+export async function clearActiveParkingSession(): Promise<boolean> {
   const supabase = getSupabaseClient();
-  const nowIso = new Date().toISOString();
-
   if (supabase) {
-    let query = supabase.from('parking_sessions').update({ cleared_at: nowIso }).is('cleared_at', null);
-    if (sessionId) {
-      query = query.eq('id', sessionId);
-    }
-    const { error } = await query;
-    if (error) {
-      console.error('Error clearing Supabase session:', error);
-      return false;
+    try {
+      await supabase
+        .from('parking_sessions')
+        .update({ cleared_at: new Date().toISOString() })
+        .is('cleared_at', null);
+    } catch (err) {
+      console.error('Supabase clear error:', err);
     }
   }
 
@@ -151,28 +158,26 @@ export async function clearActiveParkingSession(sessionId?: string): Promise<boo
     if (fs.existsSync(LOCAL_STORAGE_PATH)) {
       const content = fs.readFileSync(LOCAL_STORAGE_PATH, 'utf-8');
       const session: ParkingSession = JSON.parse(content);
-      if (!sessionId || session.id === sessionId) {
-        session.clearedAt = nowIso;
-        fs.writeFileSync(LOCAL_STORAGE_PATH, JSON.stringify(session, null, 2));
-      }
+      session.clearedAt = new Date().toISOString();
+      fs.writeFileSync(LOCAL_STORAGE_PATH, JSON.stringify(session, null, 2));
     }
+    return true;
   } catch (err) {
-    console.error('Error updating local session file:', err);
+    console.error('Error clearing local parking session:', err);
+    return false;
   }
-
-  return true;
 }
 
 export async function markAlertAsSent(sessionId: string): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (supabase) {
-    const { error } = await supabase
-      .from('parking_sessions')
-      .update({ alert_sent: true })
-      .eq('id', sessionId);
-    if (error) {
-      console.error('Error updating alert_sent in Supabase:', error);
-      return false;
+    try {
+      await supabase
+        .from('parking_sessions')
+        .update({ alert_sent: true })
+        .eq('id', sessionId);
+    } catch (err) {
+      console.error('Supabase mark alert error:', err);
     }
   }
 
@@ -185,9 +190,9 @@ export async function markAlertAsSent(sessionId: string): Promise<boolean> {
         fs.writeFileSync(LOCAL_STORAGE_PATH, JSON.stringify(session, null, 2));
       }
     }
+    return true;
   } catch (err) {
-    console.error('Error marking alert sent in local session:', err);
+    console.error('Error marking alert sent:', err);
+    return false;
   }
-
-  return true;
 }

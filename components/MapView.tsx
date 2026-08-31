@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Locate, Home, AlertCircle } from 'lucide-react';
+import { Locate, Home, AlertCircle, Car } from 'lucide-react';
 import { StreetSegment, calculateNextSweeping } from '@/lib/sweeping';
 
 interface MapViewProps {
@@ -12,7 +12,7 @@ interface MapViewProps {
 }
 
 // Official SF Parcel coordinate for 1958 Golden Gate Ave (Parcel 1151-017)
-// Located on the North side of Golden Gate Ave, just east of Lyon St
+// Located on the North side of Golden Gate Ave, between Baker St and Lyon St
 const HOME_COORDS: [number, number] = [37.778376, -122.443151];
 
 /**
@@ -73,6 +73,8 @@ export default function MapView({
   const userMarkerRef = useRef<any>(null);
   const accuracyCircleRef = useRef<any>(null);
   const selectedLineRef = useRef<any>(null);
+  const parkedMarkerRef = useRef<any>(null);
+  const parkedLineRef = useRef<any>(null);
   const leafletModuleRef = useRef<any>(null);
 
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
@@ -89,7 +91,7 @@ export default function MapView({
 
       leafletModuleRef.current = L;
 
-      // Center exactly on 1958 Golden Gate Ave parcel
+      // Center on 1958 Golden Gate Ave parcel
       const map = L.map(mapContainerRef.current, {
         center: HOME_COORDS,
         zoom: 17,
@@ -98,7 +100,7 @@ export default function MapView({
 
       mapInstanceRef.current = map;
 
-      // Clean OpenStreetMap basemap (crisp, zero watermarks)
+      // Clean OpenStreetMap basemap
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
@@ -119,13 +121,12 @@ export default function MapView({
           '<div class="text-xs font-bold text-slate-900">🏠 1958 Golden Gate Ave</div><div class="text-[10px] text-slate-600">Home</div>'
         );
 
-      // Render Street Sweeping Curb Polylines with perpendicular curb offsets
+      // Render Street Sweeping Curb Polylines with perpendicular offsets
       const now = new Date();
 
       segments.forEach((seg) => {
         if (!seg.coordinates || seg.coordinates.length < 2) return;
 
-        // Offset coordinates so Left and Right curbs render on their actual sides of the street
         const latLngs = getOffsetCoordinates(seg.coordinates, seg.sideLR || 'L', 5.5);
 
         const nextSweep = calculateNextSweeping(seg, now);
@@ -184,7 +185,7 @@ export default function MapView({
           userMarkerRef.current.setLatLng(coords);
         }
 
-        // Optional accuracy aura circle
+        // Accuracy aura
         if (accuracy && accuracy > 10 && accuracy < 200) {
           if (!accuracyCircleRef.current) {
             accuracyCircleRef.current = L.circle(coords, {
@@ -219,7 +220,7 @@ export default function MapView({
         maxZoom: 18,
       });
 
-      // Also trigger standard browser geolocation immediately for faster Safari popup
+      // Also trigger browser geolocation immediately
       if (typeof window !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
@@ -249,6 +250,70 @@ export default function MapView({
       }
     };
   }, [segments, onSelectSegment]);
+
+  // Render Parked Car Marker and highlight the parked curb
+  useEffect(() => {
+    if (!mapInstanceRef.current || !leafletModuleRef.current) return;
+    const L = leafletModuleRef.current;
+
+    // Clean up previous parked layers
+    if (parkedLineRef.current) {
+      mapInstanceRef.current.removeLayer(parkedLineRef.current);
+      parkedLineRef.current = null;
+    }
+    if (parkedMarkerRef.current) {
+      mapInstanceRef.current.removeLayer(parkedMarkerRef.current);
+      parkedMarkerRef.current = null;
+    }
+
+    if (currentSession && currentSession.isParked && currentSession.session) {
+      const segId = currentSession.session.segmentId;
+      const parkedSeg = segments.find((s) => s.id === segId);
+
+      if (parkedSeg && parkedSeg.coordinates && parkedSeg.coordinates.length >= 2) {
+        const latLngs = getOffsetCoordinates(
+          parkedSeg.coordinates,
+          parkedSeg.sideLR || 'L',
+          5.5
+        );
+
+        // Glowing Cyan curb line for parked spot
+        parkedLineRef.current = L.polyline(latLngs, {
+          color: '#06b6d4',
+          weight: 9,
+          opacity: 0.95,
+          lineCap: 'round',
+        }).addTo(mapInstanceRef.current);
+
+        // Calculate midpoint for the car pin
+        const midIdx = Math.floor(latLngs.length / 2);
+        const midCoord = latLngs[midIdx];
+
+        const carIcon = L.divIcon({
+          className: 'parked-car-wrapper',
+          html: `
+            <div class="parked-car-pin">
+              <span class="text-xl leading-none">🚗</span>
+              <div class="parked-car-pulse"></div>
+            </div>
+          `,
+          iconSize: [38, 38],
+          iconAnchor: [19, 19],
+        });
+
+        parkedMarkerRef.current = L.marker(midCoord, {
+          icon: carIcon,
+          zIndexOffset: 1200,
+        })
+          .addTo(mapInstanceRef.current)
+          .bindPopup(
+            `<div class="text-xs font-bold text-slate-900">🚗 Your Car is Parked Here</div>` +
+              `<div class="text-[11px] text-slate-700 font-semibold">${currentSession.session.corridor} (${currentSession.session.side} side)</div>` +
+              `<div class="text-[10px] text-cyan-800 mt-0.5">Sweeping: ${currentSession.details?.formattedNextSweeping || ''}</div>`
+          );
+      }
+    }
+  }, [currentSession, segments]);
 
   // Highlight selected segment
   useEffect(() => {
@@ -283,7 +348,6 @@ export default function MapView({
     if (userLocation && mapInstanceRef.current) {
       mapInstanceRef.current.flyTo(userLocation, 18, { animate: true, duration: 0.8 });
     } else if (mapInstanceRef.current) {
-      // Re-trigger location request
       mapInstanceRef.current.locate({ setView: true, maxZoom: 18, enableHighAccuracy: true });
 
       if (navigator.geolocation) {
@@ -313,13 +377,37 @@ export default function MapView({
     }
   };
 
+  // Center on Parked Car
+  const handleCenterOnCar = () => {
+    if (!mapInstanceRef.current || !currentSession?.isParked) return;
+    const segId = currentSession.session?.segmentId;
+    const parkedSeg = segments.find((s) => s.id === segId);
+    if (parkedSeg && parkedSeg.coordinates && parkedSeg.coordinates.length >= 2) {
+      const latLngs = getOffsetCoordinates(parkedSeg.coordinates, parkedSeg.sideLR || 'L', 5.5);
+      const midIdx = Math.floor(latLngs.length / 2);
+      mapInstanceRef.current.flyTo(latLngs[midIdx], 18, { animate: true, duration: 0.8 });
+    }
+  };
+
   return (
     <div className="relative w-full h-full">
       {/* Map Canvas */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* Floating Action Buttons (Safe for mobile bottoms) */}
+      {/* Floating Action Buttons */}
       <div className="absolute right-4 bottom-28 z-30 flex flex-col gap-3 pointer-events-auto">
+        {/* Car Button (appears when parked) */}
+        {currentSession?.isParked && (
+          <button
+            type="button"
+            onClick={handleCenterOnCar}
+            className="w-13 h-13 p-3.5 rounded-2xl bg-cyan-600/95 text-white border border-cyan-400 shadow-2xl backdrop-blur-md active:scale-95 transition-all flex items-center justify-center shadow-cyan-500/30 animate-in fade-in"
+            title="Center on Parked Car"
+          >
+            <Car className="w-6 h-6" />
+          </button>
+        )}
+
         <button
           type="button"
           onClick={handleCenterOnHome}
@@ -343,9 +431,9 @@ export default function MapView({
         </button>
       </div>
 
-      {/* GPS Error Prompt (if Safari blocked location) */}
+      {/* GPS Error Prompt */}
       {gpsError && !userLocation && (
-        <div className="absolute top-20 inset-x-4 z-30 pointer-events-auto">
+        <div className="absolute top-24 inset-x-4 z-30 pointer-events-auto">
           <div className="bg-amber-950/90 border border-amber-500/50 rounded-2xl p-3 text-xs text-amber-200 flex items-center gap-2.5 shadow-xl backdrop-blur-md">
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
             <span className="flex-1 leading-tight">

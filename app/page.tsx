@@ -58,21 +58,24 @@ export default function Home() {
       fetchSegments();
       fetchStatus();
 
-      // Poll status every 30 seconds while page is open
-      const interval = setInterval(fetchStatus, 30000);
+      // Poll status every 15 seconds while page is open to stay synced
+      const interval = setInterval(fetchStatus, 15000);
       return () => clearInterval(interval);
     }
   }, [isAuthenticated, fetchSegments, fetchStatus]);
 
-  const handleConfirmPark = async (segmentId: string) => {
+  const handleConfirmPark = async (segment: StreetSegment) => {
     try {
       const res = await fetch('/api/park', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segmentId }),
+        body: JSON.stringify({ segment, segmentId: segment.id }),
       });
       if (res.ok) {
         await fetchStatus();
+      } else {
+        const errData = await res.json();
+        console.error('Failed to park:', errData);
       }
     } catch (err) {
       console.error('Error setting parking spot:', err);
@@ -100,7 +103,7 @@ export default function Home() {
       {/* Top Active Parking Card */}
       <ActiveParkingCard status={parkingStatus} onClear={handleClearParking} />
 
-      {/* Map View */}
+      {/* Map View with Parked Car badge */}
       <MapView
         segments={segments}
         selectedSegment={selectedSegment}
@@ -114,6 +117,7 @@ export default function Home() {
         currentSession={parkingStatus}
         onClose={() => setSelectedSegment(null)}
         onConfirmPark={handleConfirmPark}
+        onClearParking={handleClearParking}
       />
     </main>
   );

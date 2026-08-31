@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveSession, markAlertAsSent } from '@/lib/db';
 import { sendTelegramAlert } from '@/lib/telegram';
+import { sendWhatsAppAlert } from '@/lib/whatsapp';
 import { formatTimeRange } from '@/lib/sweeping';
 
 export async function GET(req: NextRequest) {
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
         dateOptions
       )} (${formatTimeRange(session.fromHour, session.toHour)})`;
 
-      const sent = await sendTelegramAlert({
+      const tgSent = await sendTelegramAlert({
         corridor: session.corridor,
         limits: session.limits,
         side: session.side,
@@ -50,15 +51,26 @@ export async function GET(req: NextRequest) {
         sessionId: session.id,
       });
 
+      const waSent = await sendWhatsAppAlert({
+        corridor: session.corridor,
+        limits: session.limits,
+        side: session.side,
+        formattedNextSweeping,
+        hoursUntilSweeping: hoursUntil,
+      });
+
+      const sent = tgSent || waSent;
+
       if (sent) {
         await markAlertAsSent(session.id);
         return NextResponse.json({
           status: 'alert_sent',
           corridor: session.corridor,
           sweeping: formattedNextSweeping,
+          channels: { telegram: tgSent, whatsapp: waSent },
         });
       } else {
-        return NextResponse.json({ error: 'Failed to send Telegram message' }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to send alert via Telegram or WhatsApp' }, { status: 500 });
       }
     }
 
