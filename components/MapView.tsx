@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Locate, Home } from 'lucide-react';
+import { Locate, Home, AlertCircle } from 'lucide-react';
 import { StreetSegment, calculateNextSweeping } from '@/lib/sweeping';
 
 interface MapViewProps {
@@ -11,8 +11,9 @@ interface MapViewProps {
   onSelectSegment: (segment: StreetSegment) => void;
 }
 
-// User's home at 1958 Golden Gate Ave (at Lyon St)
-const HOME_COORDS: [number, number] = [37.7785, -122.4435];
+// Official SF Parcel coordinate for 1958 Golden Gate Ave (Parcel 1151-017)
+// Located on the North side of Golden Gate Ave, just east of Lyon St
+const HOME_COORDS: [number, number] = [37.778376, -122.443151];
 
 /**
  * Offsets polyline coordinates perpendicular to the street direction so both
@@ -70,9 +71,12 @@ export default function MapView({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const userMarkerRef = useRef<any>(null);
+  const accuracyCircleRef = useRef<any>(null);
   const selectedLineRef = useRef<any>(null);
+  const leafletModuleRef = useRef<any>(null);
 
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [gpsError, setGpsError] = useState<string | null>(null);
 
   // Initialize Map
   useEffect(() => {
@@ -83,7 +87,9 @@ export default function MapView({
     import('leaflet').then((L) => {
       if (!isMounted || !mapContainerRef.current) return;
 
-      // Default center: 1958 Golden Gate Ave
+      leafletModuleRef.current = L;
+
+      // Center exactly on 1958 Golden Gate Ave parcel
       const map = L.map(mapContainerRef.current, {
         center: HOME_COORDS,
         zoom: 17,
@@ -92,25 +98,25 @@ export default function MapView({
 
       mapInstanceRef.current = map;
 
-      // Clean OpenStreetMap basemap (Free, crisp, no API key required, no watermark)
+      // Clean OpenStreetMap basemap (crisp, zero watermarks)
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
         subdomains: ['a', 'b', 'c'],
       }).addTo(map);
 
       // Home marker icon (1958 Golden Gate Ave)
       const homeIcon = L.divIcon({
-        className: 'custom-home-marker',
+        className: 'home-marker-wrapper',
         html: '<div class="home-pin">🏠</div>',
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
 
-      L.marker(HOME_COORDS, { icon: homeIcon, zIndexOffset: 500 })
+      L.marker(HOME_COORDS, { icon: homeIcon, zIndexOffset: 800 })
         .addTo(map)
         .bindPopup(
-          '<div class="text-xs font-semibold text-slate-900">🏠 Home: 1958 Golden Gate Ave</div>'
+          '<div class="text-xs font-bold text-slate-900">🏠 1958 Golden Gate Ave</div><div class="text-[10px] text-slate-600">Home</div>'
         );
 
       // Render Street Sweeping Curb Polylines with perpendicular curb offsets
@@ -155,106 +161,152 @@ export default function MapView({
           onSelectSegment(seg);
         });
       });
+
+      // Update or create live GPS marker on map
+      const updateLocationMarker = (lat: number, lng: number, accuracy?: number) => {
+        const coords: [number, number] = [lat, lng];
+        setUserLocation(coords);
+        setGpsError(null);
+
+        const gpsIcon = L.divIcon({
+          className: 'gps-marker-wrapper',
+          html: '<div class="live-gps-dot"><div class="live-gps-pulse"></div></div>',
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        });
+
+        if (!userMarkerRef.current) {
+          userMarkerRef.current = L.marker(coords, {
+            icon: gpsIcon,
+            zIndexOffset: 1500,
+          }).addTo(map);
+        } else {
+          userMarkerRef.current.setLatLng(coords);
+        }
+
+        // Optional accuracy aura circle
+        if (accuracy && accuracy > 10 && accuracy < 200) {
+          if (!accuracyCircleRef.current) {
+            accuracyCircleRef.current = L.circle(coords, {
+              radius: accuracy,
+              color: '#3b82f6',
+              weight: 1,
+              fillColor: '#3b82f6',
+              fillOpacity: 0.12,
+            }).addTo(map);
+          } else {
+            accuracyCircleRef.current.setLatLng(coords);
+            accuracyCircleRef.current.setRadius(accuracy);
+          }
+        }
+      };
+
+      // Built-in Leaflet GPS tracking
+      map.on('locationfound', (e: any) => {
+        updateLocationMarker(e.latlng.lat, e.latlng.lng, e.accuracy);
+      });
+
+      map.on('locationerror', (e: any) => {
+        console.warn('Leaflet location error:', e.message);
+        setGpsError(e.message);
+      });
+
+      // Start watching user location with Leaflet
+      map.locate({
+        watch: true,
+        enableHighAccuracy: true,
+        setView: false,
+        maxZoom: 18,
+      });
+
+      // Also trigger standard browser geolocation immediately for faster Safari popup
+      if (typeof window !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            updateLocationMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+          },
+          (err) => {
+            console.warn('Browser GPS error:', err.message);
+            if (err.code === 1) {
+              setGpsError('Location permission denied in Safari.');
+            }
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 10000,
+          }
+        );
+      }
     });
 
     return () => {
       isMounted = false;
       if (mapInstanceRef.current) {
+        mapInstanceRef.current.stopLocate();
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
     };
   }, [segments, onSelectSegment]);
 
-  // Live GPS tracking on mobile
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserLocation(coords);
-
-        if (mapInstanceRef.current) {
-          import('leaflet').then((L) => {
-            if (!mapInstanceRef.current) return;
-
-            if (!userMarkerRef.current) {
-              const gpsIcon = L.divIcon({
-                className: 'custom-gps-marker',
-                html: '<div class="live-gps-dot"><div class="live-gps-pulse"></div></div>',
-                iconSize: [18, 18],
-                iconAnchor: [9, 9],
-              });
-
-              userMarkerRef.current = L.marker(coords, {
-                icon: gpsIcon,
-                zIndexOffset: 1000,
-              }).addTo(mapInstanceRef.current);
-            } else {
-              userMarkerRef.current.setLatLng(coords);
-            }
-          });
-        }
-      },
-      (err) => console.warn('GPS watch error:', err.message),
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 3000,
-      }
-    );
-
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, []);
-
   // Highlight selected segment
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
+    if (!mapInstanceRef.current || !leafletModuleRef.current) return;
+    const L = leafletModuleRef.current;
 
-    import('leaflet').then((L) => {
-      if (!mapInstanceRef.current) return;
+    if (selectedLineRef.current) {
+      mapInstanceRef.current.removeLayer(selectedLineRef.current);
+      selectedLineRef.current = null;
+    }
 
-      if (selectedLineRef.current) {
-        mapInstanceRef.current.removeLayer(selectedLineRef.current);
-        selectedLineRef.current = null;
-      }
+    if (selectedSegment && selectedSegment.coordinates) {
+      const latLngs = getOffsetCoordinates(
+        selectedSegment.coordinates,
+        selectedSegment.sideLR || 'L',
+        5.5
+      );
 
-      if (selectedSegment && selectedSegment.coordinates) {
-        const latLngs = getOffsetCoordinates(
-          selectedSegment.coordinates,
-          selectedSegment.sideLR || 'L',
-          5.5
-        );
+      selectedLineRef.current = L.polyline(latLngs, {
+        color: '#38bdf8',
+        weight: 8,
+        opacity: 0.95,
+        lineCap: 'round',
+      }).addTo(mapInstanceRef.current);
 
-        selectedLineRef.current = L.polyline(latLngs, {
-          color: '#38bdf8',
-          weight: 8,
-          opacity: 0.95,
-          lineCap: 'round',
-        }).addTo(mapInstanceRef.current);
-
-        mapInstanceRef.current.panTo(latLngs[0], { animate: true });
-      }
-    });
+      mapInstanceRef.current.panTo(latLngs[0], { animate: true });
+    }
   }, [selectedSegment]);
 
   // Center on user GPS
   const handleCenterOnUser = () => {
     if (userLocation && mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo(userLocation, 17, { animate: true, duration: 0.8 });
-    } else {
-      navigator.geolocation?.getCurrentPosition((pos) => {
-        const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-        setUserLocation(coords);
-        mapInstanceRef.current?.flyTo(coords, 17, { animate: true, duration: 0.8 });
-      });
+      mapInstanceRef.current.flyTo(userLocation, 18, { animate: true, duration: 0.8 });
+    } else if (mapInstanceRef.current) {
+      // Re-trigger location request
+      mapInstanceRef.current.locate({ setView: true, maxZoom: 18, enableHighAccuracy: true });
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+            setUserLocation(coords);
+            mapInstanceRef.current?.flyTo(coords, 18, { animate: true, duration: 0.8 });
+          },
+          (err) => {
+            if (err.code === 1) {
+              alert(
+                'Location access is blocked in Safari. To enable:\n1. Tap the "aA" icon in Safari URL bar\n2. Tap "Website Settings"\n3. Change Location to "Allow"'
+              );
+            }
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      }
     }
   };
 
-  // Center on Home
+  // Center on Home (1958 Golden Gate Ave)
   const handleCenterOnHome = () => {
     if (mapInstanceRef.current) {
       mapInstanceRef.current.flyTo(HOME_COORDS, 17, { animate: true, duration: 0.8 });
@@ -280,12 +332,28 @@ export default function MapView({
         <button
           type="button"
           onClick={handleCenterOnUser}
-          className="w-13 h-13 p-3.5 rounded-2xl bg-slate-900/90 text-blue-400 active:text-white border border-slate-700/80 shadow-2xl backdrop-blur-md active:scale-95 transition-all flex items-center justify-center"
+          className={`w-13 h-13 p-3.5 rounded-2xl border shadow-2xl backdrop-blur-md active:scale-95 transition-all flex items-center justify-center ${
+            userLocation
+              ? 'bg-blue-600/90 text-white border-blue-400 shadow-blue-500/20'
+              : 'bg-slate-900/90 text-blue-400 border-slate-700/80'
+          }`}
           title="Center on my live location"
         >
           <Locate className="w-6 h-6" />
         </button>
       </div>
+
+      {/* GPS Error Prompt (if Safari blocked location) */}
+      {gpsError && !userLocation && (
+        <div className="absolute top-20 inset-x-4 z-30 pointer-events-auto">
+          <div className="bg-amber-950/90 border border-amber-500/50 rounded-2xl p-3 text-xs text-amber-200 flex items-center gap-2.5 shadow-xl backdrop-blur-md">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="flex-1 leading-tight">
+              Location access is off. Tap <strong>aA</strong> in Safari &gt; <strong>Website Settings</strong> &gt; set <strong>Location</strong> to <strong>Allow</strong>.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Legend for Urgency */}
       <div className="absolute left-4 bottom-28 z-20 pointer-events-none">

@@ -28,6 +28,11 @@ html, body {
 }
 
 /* Custom pulsing live location marker */
+.gps-marker-wrapper, .home-marker-wrapper {
+  background: transparent !important;
+  border: none !important;
+}
+
 .live-gps-dot {
   width: 18px;
   height: 18px;
