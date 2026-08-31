@@ -268,7 +268,7 @@ export default function MapView({
 
     if (currentSession && currentSession.isParked && currentSession.session) {
       const segId = currentSession.session.segmentId;
-      const parkedSeg = segments.find((s) => s.id === segId);
+      const parkedSeg = segments.find((s) => String(s.id) === String(segId));
 
       if (parkedSeg && parkedSeg.coordinates && parkedSeg.coordinates.length >= 2) {
         const latLngs = getOffsetCoordinates(
@@ -381,7 +381,7 @@ export default function MapView({
   const handleCenterOnCar = () => {
     if (!mapInstanceRef.current || !currentSession?.isParked) return;
     const segId = currentSession.session?.segmentId;
-    const parkedSeg = segments.find((s) => s.id === segId);
+    const parkedSeg = segments.find((s) => String(s.id) === String(segId));
     if (parkedSeg && parkedSeg.coordinates && parkedSeg.coordinates.length >= 2) {
       const latLngs = getOffsetCoordinates(parkedSeg.coordinates, parkedSeg.sideLR || 'L', 5.5);
       const midIdx = Math.floor(latLngs.length / 2);

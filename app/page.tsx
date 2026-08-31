@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import PinGate from '@/components/PinGate';
 import ActiveParkingCard from '@/components/ActiveParkingCard';
 import SegmentDrawer from '@/components/SegmentDrawer';
-import { StreetSegment } from '@/lib/sweeping';
+import { StreetSegment, calculateNextSweeping } from '@/lib/sweeping';
 
 // Dynamic import for Leaflet map with no SSR
 const MapView = dynamic(() => import('@/components/MapView'), {
@@ -18,6 +18,8 @@ const MapView = dynamic(() => import('@/components/MapView'), {
   ),
 });
 
+const STORAGE_KEY = 'nopa_active_parking_session_v1';
+
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [segments, setSegments] = useState<StreetSegment[]>([]);
@@ -25,13 +27,46 @@ export default function Home() {
   const [parkingStatus, setParkingStatus] = useState<any>(null);
   const [loadingData, setLoadingData] = useState(true);
 
-  // Fetch active parking status
+  // Restore active parking session from localStorage immediately on load
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.isParked && parsed.session) {
+            setParkingStatus(parsed);
+          }
+        }
+      } catch (err) {
+        console.error('Error reading localStorage session:', err);
+      }
+    }
+  }, []);
+
+  // Fetch active parking status from server (Supabase / serverless)
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/status');
       if (res.ok) {
         const data = await res.json();
-        setParkingStatus(data);
+        if (data && data.isParked && data.session) {
+          setParkingStatus(data);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          }
+        } else if (data && data.isParked === false && data.session === null) {
+          const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (data.clearedAt && parsed.session?.parkedAt && new Date(data.clearedAt) > new Date(parsed.session.parkedAt)) {
+                setParkingStatus({ isParked: false, session: null });
+                localStorage.removeItem(STORAGE_KEY);
+              }
+            } catch (e) {}
+          }
+        }
       }
     } catch (err) {
       console.error('Error fetching parking status:', err);
@@ -65,17 +100,65 @@ export default function Home() {
   }, [isAuthenticated, fetchSegments, fetchStatus]);
 
   const handleConfirmPark = async (segment: StreetSegment) => {
+    const now = new Date();
+    const sweeping = calculateNextSweeping(segment, now);
+
+    // 1. Optimistic Instant UI Update (0ms delay)
+    // The car pin, glowing line, and clear button appear immediately!
+    const newStatus = {
+      isParked: true,
+      session: {
+        id: Date.now().toString(),
+        segmentId: String(segment.id),
+        corridor: segment.corridor,
+        limits: segment.limits,
+        side: segment.side,
+        weekday: segment.weekday,
+        fromHour: segment.fromHour,
+        toHour: segment.toHour,
+        sweepingStart: sweeping ? sweeping.startTime.toISOString() : '',
+        sweepingEnd: sweeping ? sweeping.endTime.toISOString() : '',
+        alertTime: sweeping ? sweeping.alertTime.toISOString() : '',
+        parkedAt: now.toISOString(),
+      },
+      details: sweeping
+        ? {
+            formattedNextSweeping: sweeping.formattedNextSweeping,
+            formattedAlertTime: sweeping.formattedAlertTime,
+            hoursUntilSweeping: sweeping.hoursUntilSweeping,
+            isSweepingNow: sweeping.isSweepingNow,
+          }
+        : null,
+    };
+
+    setParkingStatus(newStatus);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(newStatus));
+    }
+
+    // 2. Send to backend (saves to Supabase / sends Telegram alert)
     try {
       const res = await fetch('/api/park', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ segment, segmentId: segment.id }),
+        body: JSON.stringify({ segment, segmentId: String(segment.id) }),
       });
       if (res.ok) {
-        await fetchStatus();
+        const data = await res.json();
+        if (data && data.session) {
+          const verifiedStatus = {
+            isParked: true,
+            session: data.session,
+            details: data.details || newStatus.details,
+          };
+          setParkingStatus(verifiedStatus);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(verifiedStatus));
+          }
+        }
       } else {
         const errData = await res.json();
-        console.error('Failed to park:', errData);
+        console.error('Server park error:', errData);
       }
     } catch (err) {
       console.error('Error setting parking spot:', err);
@@ -83,12 +166,16 @@ export default function Home() {
   };
 
   const handleClearParking = async () => {
+    // 1. Instant UI Clear (0ms delay)
+    setParkingStatus({ isParked: false, session: null });
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+    setSelectedSegment(null);
+
+    // 2. Dispatch to server (clears Supabase & triggers Telegram "Car Moved" alert)
     try {
-      const res = await fetch('/api/clear', { method: 'POST' });
-      if (res.ok) {
-        await fetchStatus();
-        setSelectedSegment(null);
-      }
+      await fetch('/api/clear', { method: 'POST' });
     } catch (err) {
       console.error('Error clearing parking:', err);
     }
@@ -100,10 +187,10 @@ export default function Home() {
 
   return (
     <main className="relative w-full h-full overflow-hidden bg-slate-950">
-      {/* Top Active Parking Card */}
+      {/* Top Active Parking Card with Clear Parking / I Moved Button */}
       <ActiveParkingCard status={parkingStatus} onClear={handleClearParking} />
 
-      {/* Map View with Parked Car badge */}
+      {/* Map View with 🚗 Parked Car Pin and glowing cyan curb */}
       <MapView
         segments={segments}
         selectedSegment={selectedSegment}

@@ -15,7 +15,8 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
     return null;
   }
 
-  const { session, details } = status;
+  const session = status.session;
+  const details = status.details || {};
 
   const handleClear = async () => {
     setClearing(true);
@@ -26,24 +27,28 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
     }
   };
 
-  const isUrgent = details.hoursUntilSweeping <= 12;
+  const isUrgent = details.hoursUntilSweeping !== undefined && details.hoursUntilSweeping <= 12;
 
   return (
     <div className="absolute top-0 left-0 right-0 z-30 p-4 safe-top pointer-events-none">
       <div
-        className={`pointer-events-auto rounded-2xl border p-4 shadow-xl backdrop-blur-md transition-all duration-200 ${
+        className={`pointer-events-auto rounded-2xl border p-4 shadow-2xl backdrop-blur-md transition-all duration-200 ${
           details.isSweepingNow
             ? 'bg-red-950/90 border-red-500/50 shadow-red-500/10'
             : isUrgent
             ? 'bg-amber-950/90 border-amber-500/50 shadow-amber-500/10'
-            : 'bg-slate-900/90 border-slate-700/60 shadow-black/40'
+            : 'bg-slate-900/95 border-cyan-500/40 shadow-cyan-500/10'
         }`}
       >
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <div
-              className={`p-2 rounded-xl ${
-                isUrgent ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
+              className={`p-2.5 rounded-xl ${
+                details.isSweepingNow
+                  ? 'bg-red-500/20 text-red-400'
+                  : isUrgent
+                  ? 'bg-amber-500/20 text-amber-400'
+                  : 'bg-cyan-500/20 text-cyan-400'
               }`}
             >
               {details.isSweepingNow ? (
@@ -63,12 +68,14 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
                       ? 'bg-red-500/20 text-red-300'
                       : isUrgent
                       ? 'bg-amber-500/20 text-amber-300'
-                      : 'bg-blue-500/20 text-blue-300'
+                      : 'bg-cyan-500/20 text-cyan-300'
                   }`}
                 >
                   {details.isSweepingNow
                     ? 'Sweeping Now!'
-                    : `In ${details.hoursUntilSweeping}h`}
+                    : details.hoursUntilSweeping !== undefined
+                    ? `In ${details.hoursUntilSweeping}h`
+                    : 'Active'}
                 </span>
               </div>
               <h2 className="text-base font-bold text-white mt-0.5 leading-tight">
@@ -79,25 +86,31 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
           </div>
         </div>
 
-        <div className="mt-3 pt-3 border-t border-slate-700/50 grid grid-cols-2 gap-2 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <Clock className="w-4 h-4 text-slate-400 shrink-0" />
-            <span className="truncate">{details.formattedNextSweeping}</span>
+        {(details.formattedNextSweeping || details.formattedAlertTime) && (
+          <div className="mt-3 pt-3 border-t border-slate-700/50 grid grid-cols-2 gap-2 text-xs">
+            {details.formattedNextSweeping && (
+              <div className="flex items-center gap-1.5 text-slate-300">
+                <Clock className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span className="truncate">{details.formattedNextSweeping}</span>
+              </div>
+            )}
+            {details.formattedAlertTime && (
+              <div className="flex items-center gap-1.5 text-slate-300">
+                <Bell className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="truncate">Alert: {details.formattedAlertTime}</span>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-1.5 text-slate-300">
-            <Bell className="w-4 h-4 text-slate-400 shrink-0" />
-            <span className="truncate">Alert: {details.formattedAlertTime}</span>
-          </div>
-        </div>
+        )}
 
         <button
           type="button"
           disabled={clearing}
           onClick={handleClear}
-          className="mt-3 w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-xs font-semibold text-rose-300 hover:text-rose-200 border border-slate-700/60 transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
+          className="mt-3 w-full py-2.5 px-4 rounded-xl bg-rose-600/90 hover:bg-rose-500 active:bg-rose-700 text-xs font-bold text-white border border-rose-500/50 shadow-lg shadow-rose-600/20 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
         >
-          <XCircle className="w-4 h-4 text-rose-400" />
-          {clearing ? 'Clearing Parking...' : 'Clear Parking / I Moved the Car'}
+          <XCircle className="w-4 h-4 text-white" />
+          {clearing ? 'Clearing Parking...' : '🚗 Clear Parking / I Moved the Car'}
         </button>
       </div>
     </div>
