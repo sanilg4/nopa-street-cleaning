@@ -26,10 +26,11 @@ const LOCAL_STORAGE_PATH =
     : path.join(process.cwd(), 'data', 'parking_session.json');
 
 function getSupabaseClient() {
-  const url = process.env.SUPABASE_URL;
+  let url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !key) return null;
-  return createClient(url, key);
+  url = url.trim().replace(/\/rest\/v1\/?$/, '');
+  return createClient(url, key.trim());
 }
 
 export async function getActiveSession(): Promise<ParkingSession | null> {
@@ -141,14 +142,20 @@ export async function saveNewParkingSession(
   return newSession;
 }
 
-export async function clearActiveParkingSession(): Promise<boolean> {
+export async function clearActiveParkingSession(sessionId?: string): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      await supabase
+      let query = supabase
         .from('parking_sessions')
         .update({ cleared_at: new Date().toISOString() })
         .is('cleared_at', null);
+
+      if (sessionId) {
+        query = query.eq('id', sessionId);
+      }
+
+      await query;
     } catch (err) {
       console.error('Supabase clear error:', err);
     }
@@ -158,8 +165,10 @@ export async function clearActiveParkingSession(): Promise<boolean> {
     if (fs.existsSync(LOCAL_STORAGE_PATH)) {
       const content = fs.readFileSync(LOCAL_STORAGE_PATH, 'utf-8');
       const session: ParkingSession = JSON.parse(content);
-      session.clearedAt = new Date().toISOString();
-      fs.writeFileSync(LOCAL_STORAGE_PATH, JSON.stringify(session, null, 2));
+      if (!sessionId || session.id === sessionId) {
+        session.clearedAt = new Date().toISOString();
+        fs.writeFileSync(LOCAL_STORAGE_PATH, JSON.stringify(session, null, 2));
+      }
     }
     return true;
   } catch (err) {
