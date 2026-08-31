@@ -14,6 +14,53 @@ interface MapViewProps {
 // User's home at 1958 Golden Gate Ave (at Lyon St)
 const HOME_COORDS: [number, number] = [37.7785, -122.4435];
 
+/**
+ * Offsets polyline coordinates perpendicular to the street direction so both
+ * the Left and Right curbs render as separate parallel lines on opposite sides
+ * of the street instead of overlapping on the same centerline.
+ */
+function getOffsetCoordinates(
+  coordinates: [number, number][],
+  sideLR: string,
+  offsetMeters: number = 5.5
+): [number, number][] {
+  if (!coordinates || coordinates.length < 2) {
+    return coordinates.map(([lng, lat]) => [lat, lng]);
+  }
+
+  const degPerMeterLat = 1.0 / 111111.0;
+  const sign = sideLR === 'L' ? 1.0 : -1.0;
+  const result: [number, number][] = [];
+
+  for (let i = 0; i < coordinates.length; i++) {
+    const pPrev = coordinates[Math.max(0, i - 1)];
+    const pNext = coordinates[Math.min(coordinates.length - 1, i + 1)];
+
+    const latRad = ((pPrev[1] + pNext[1]) / 2.0) * (Math.PI / 180.0);
+    const degPerMeterLng = 1.0 / (111111.0 * Math.cos(latRad));
+
+    const dx = (pNext[0] - pPrev[0]) * Math.cos(latRad);
+    const dy = pNext[1] - pPrev[1];
+    const len = Math.hypot(dx, dy);
+
+    if (len === 0) {
+      result.push([coordinates[i][1], coordinates[i][0]]);
+      continue;
+    }
+
+    // Normal vector pointing Left of street heading
+    const nx = -dy / len;
+    const ny = dx / len;
+
+    const dLat = sign * ny * offsetMeters * degPerMeterLat;
+    const dLng = sign * nx * offsetMeters * degPerMeterLng;
+
+    result.push([coordinates[i][1] + dLat, coordinates[i][0] + dLng]);
+  }
+
+  return result;
+}
+
 export default function MapView({
   segments,
   selectedSegment,
@@ -45,15 +92,12 @@ export default function MapView({
 
       mapInstanceRef.current = map;
 
-      // Clean, dark CartoDB Voyager basemap
-      L.tileLayer(
-        'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        {
-          attribution: '&copy; CARTO',
-          maxZoom: 19,
-          subdomains: 'abcd',
-        }
-      ).addTo(map);
+      // Clean OpenStreetMap basemap (Free, crisp, no API key required, no watermark)
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+        subdomains: ['a', 'b', 'c'],
+      }).addTo(map);
 
       // Home marker icon (1958 Golden Gate Ave)
       const homeIcon = L.divIcon({
@@ -69,14 +113,14 @@ export default function MapView({
           '<div class="text-xs font-semibold text-slate-900">🏠 Home: 1958 Golden Gate Ave</div>'
         );
 
-      // Render Street Sweeping Curb Polylines with touch-friendly hit areas
+      // Render Street Sweeping Curb Polylines with perpendicular curb offsets
       const now = new Date();
 
       segments.forEach((seg) => {
         if (!seg.coordinates || seg.coordinates.length < 2) return;
 
-        // Leaflet expects [lat, lng], DataSF coordinates are [lng, lat]
-        const latLngs = seg.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]);
+        // Offset coordinates so Left and Right curbs render on their actual sides of the street
+        const latLngs = getOffsetCoordinates(seg.coordinates, seg.sideLR || 'L', 5.5);
 
         const nextSweep = calculateNextSweeping(seg, now);
         let strokeColor = '#10b981'; // Green: > 48 hours away
@@ -92,16 +136,16 @@ export default function MapView({
         // Visible colored curb line
         L.polyline(latLngs, {
           color: strokeColor,
-          weight: 5,
-          opacity: 0.9,
+          weight: 4.5,
+          opacity: 0.92,
           lineCap: 'round',
           lineJoin: 'round',
         }).addTo(map);
 
-        // Invisible wider touch buffer (18px) for effortless tapping on mobile
+        // Invisible wider touch buffer (20px) for effortless tapping on mobile
         const touchBuffer = L.polyline(latLngs, {
           color: '#ffffff',
-          weight: 22,
+          weight: 20,
           opacity: 0.001,
           lineCap: 'round',
         }).addTo(map);
@@ -179,13 +223,15 @@ export default function MapView({
       }
 
       if (selectedSegment && selectedSegment.coordinates) {
-        const latLngs = selectedSegment.coordinates.map(
-          ([lng, lat]) => [lat, lng] as [number, number]
+        const latLngs = getOffsetCoordinates(
+          selectedSegment.coordinates,
+          selectedSegment.sideLR || 'L',
+          5.5
         );
 
         selectedLineRef.current = L.polyline(latLngs, {
           color: '#38bdf8',
-          weight: 9,
+          weight: 8,
           opacity: 0.95,
           lineCap: 'round',
         }).addTo(mapInstanceRef.current);
