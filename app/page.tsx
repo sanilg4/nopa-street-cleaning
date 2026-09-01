@@ -113,6 +113,8 @@ export default function Home() {
         corridor: segment.corridor,
         limits: segment.limits,
         side: segment.side,
+        sideLR: segment.sideLR || 'L',
+        coordinates: segment.coordinates,
         weekday: segment.weekday,
         fromHour: segment.fromHour,
         toHour: segment.toHour,
@@ -148,7 +150,11 @@ export default function Home() {
         if (data && data.session) {
           const verifiedStatus = {
             isParked: true,
-            session: data.session,
+            session: {
+              ...data.session,
+              coordinates: segment.coordinates,
+              sideLR: segment.sideLR || 'L',
+            },
             details: data.details || newStatus.details,
           };
           setParkingStatus(verifiedStatus);

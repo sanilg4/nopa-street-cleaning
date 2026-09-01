@@ -1,6 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getActiveSession } from '@/lib/db';
-import { formatTimeRange } from '@/lib/sweeping';
+import { formatTimeRange, StreetSegment } from '@/lib/sweeping';
+import fs from 'fs';
+import path from 'path';
+
+let cachedSegments: StreetSegment[] | null = null;
+function getSegments(): StreetSegment[] {
+  if (!cachedSegments) {
+    const filePath = path.join(process.cwd(), 'data', 'nopa_segments.json');
+    if (fs.existsSync(filePath)) {
+      cachedSegments = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    }
+  }
+  return cachedSegments || [];
+}
 
 export async function GET() {
   try {
@@ -8,6 +21,9 @@ export async function GET() {
     if (!session) {
       return NextResponse.json({ isParked: false, session: null });
     }
+
+    const allSegments = getSegments();
+    const segment = allSegments.find((s) => String(s.id) === String(session.segmentId));
 
     const now = new Date();
     const sweepingStart = new Date(session.sweepingStart);
@@ -27,7 +43,11 @@ export async function GET() {
 
     return NextResponse.json({
       isParked: true,
-      session,
+      session: {
+        ...session,
+        coordinates: segment?.coordinates || null,
+        sideLR: segment?.sideLR || 'L',
+      },
       details: {
         formattedNextSweeping: `${sweepingStart.toLocaleDateString('en-US', dateOptions)} (${formatTimeRange(
           session.fromHour,

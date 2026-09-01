@@ -70,18 +70,20 @@ export default function MapView({
 }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
+  const leafletModuleRef = useRef<any>(null);
+
+  // Dedicated Layer Groups
+  const segmentsLayerRef = useRef<any>(null);
+  const parkedLayerRef = useRef<any>(null);
+  const selectedLineRef = useRef<any>(null);
   const userMarkerRef = useRef<any>(null);
   const accuracyCircleRef = useRef<any>(null);
-  const selectedLineRef = useRef<any>(null);
-  const parkedLineRef = useRef<any>(null);
-  const parkedMarkerRef = useRef<any>(null);
-  const leafletModuleRef = useRef<any>(null);
 
   const [mapReady, setMapReady] = useState(false);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
-  // Initialize Map
+  // 1. Initialize Map ONCE on mount
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -101,12 +103,16 @@ export default function MapView({
 
       mapInstanceRef.current = map;
 
-      // Clean OpenStreetMap basemap
+      // OpenStreetMap basemap
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
         subdomains: ['a', 'b', 'c'],
       }).addTo(map);
+
+      // Layer groups for dynamic elements
+      segmentsLayerRef.current = L.layerGroup().addTo(map);
+      parkedLayerRef.current = L.featureGroup().addTo(map);
 
       // Home marker icon (1958 Golden Gate Ave)
       const homeIcon = L.divIcon({
@@ -121,48 +127,6 @@ export default function MapView({
         .bindPopup(
           '<div class="text-xs font-bold text-slate-900">🏠 1958 Golden Gate Ave</div><div class="text-[10px] text-slate-600">Home</div>'
         );
-
-      // Render Street Sweeping Curb Polylines with perpendicular offsets
-      const now = new Date();
-
-      segments.forEach((seg) => {
-        if (!seg.coordinates || seg.coordinates.length < 2) return;
-
-        const latLngs = getOffsetCoordinates(seg.coordinates, seg.sideLR || 'L', 5.5);
-
-        const nextSweep = calculateNextSweeping(seg, now);
-        let strokeColor = '#10b981'; // Green: > 48 hours away
-
-        if (nextSweep) {
-          if (nextSweep.isSweepingNow || nextSweep.hoursUntilSweeping <= 24) {
-            strokeColor = '#ef4444'; // Red: < 24h or today
-          } else if (nextSweep.hoursUntilSweeping <= 48) {
-            strokeColor = '#f59e0b'; // Amber: 24h - 48h
-          }
-        }
-
-        // Visible colored curb line
-        L.polyline(latLngs, {
-          color: strokeColor,
-          weight: 4.5,
-          opacity: 0.92,
-          lineCap: 'round',
-          lineJoin: 'round',
-        }).addTo(map);
-
-        // Invisible wider touch buffer (20px) for effortless tapping on mobile
-        const touchBuffer = L.polyline(latLngs, {
-          color: '#ffffff',
-          weight: 20,
-          opacity: 0.001,
-          lineCap: 'round',
-        }).addTo(map);
-
-        touchBuffer.on('click', (e) => {
-          L.DomEvent.stopPropagation(e);
-          onSelectSegment(seg);
-        });
-      });
 
       // Update or create live GPS marker on map
       const updateLocationMarker = (lat: number, lng: number, accuracy?: number) => {
@@ -186,7 +150,6 @@ export default function MapView({
           userMarkerRef.current.setLatLng(coords);
         }
 
-        // Accuracy aura
         if (accuracy && accuracy > 10 && accuracy < 200) {
           if (!accuracyCircleRef.current) {
             accuracyCircleRef.current = L.circle(coords, {
@@ -203,7 +166,6 @@ export default function MapView({
         }
       };
 
-      // Built-in Leaflet GPS tracking
       map.on('locationfound', (e: any) => {
         updateLocationMarker(e.latlng.lat, e.latlng.lng, e.accuracy);
       });
@@ -213,7 +175,6 @@ export default function MapView({
         setGpsError(e.message);
       });
 
-      // Start watching user location with Leaflet
       map.locate({
         watch: true,
         enableHighAccuracy: true,
@@ -221,78 +182,115 @@ export default function MapView({
         maxZoom: 18,
       });
 
-      // Also trigger browser geolocation immediately
       if (typeof window !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             updateLocationMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
           },
           (err) => {
-            console.warn('Browser GPS error:', err.message);
             if (err.code === 1) {
               setGpsError('Location permission denied in Safari.');
             }
           },
-          {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 10000,
-          }
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
         );
       }
 
-      // Signal that map is ready so dependent layers render immediately
       setMapReady(true);
     });
 
     return () => {
       isMounted = false;
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.stopLocate();
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
     };
-  }, [segments, onSelectSegment]);
+  }, []);
 
-  // Render Parked Car Marker and highlight the parked curb in BRIGHT ELECTRIC BLUE
+  // 2. Render Street Segments (updates in place without destroying map)
   useEffect(() => {
-    if (!mapInstanceRef.current || !leafletModuleRef.current) return;
+    if (!mapReady || !segmentsLayerRef.current || !leafletModuleRef.current) return;
     const L = leafletModuleRef.current;
-    const map = mapInstanceRef.current;
+    const layerGroup = segmentsLayerRef.current;
 
-    // Clean up previous parked layers
-    if (parkedLineRef.current) {
-      map.removeLayer(parkedLineRef.current);
-      parkedLineRef.current = null;
-    }
-    if (parkedMarkerRef.current) {
-      map.removeLayer(parkedMarkerRef.current);
-      parkedMarkerRef.current = null;
-    }
+    layerGroup.clearLayers();
+    const now = new Date();
+
+    segments.forEach((seg) => {
+      if (!seg.coordinates || seg.coordinates.length < 2) return;
+
+      const latLngs = getOffsetCoordinates(seg.coordinates, seg.sideLR || 'L', 5.5);
+      const nextSweep = calculateNextSweeping(seg, now);
+      let strokeColor = '#10b981'; // Green: > 48h
+
+      if (nextSweep) {
+        if (nextSweep.isSweepingNow || nextSweep.hoursUntilSweeping <= 24) {
+          strokeColor = '#ef4444'; // Red: < 24h
+        } else if (nextSweep.hoursUntilSweeping <= 48) {
+          strokeColor = '#f59e0b'; // Amber: 24h - 48h
+        }
+      }
+
+      // Visible colored curb line
+      L.polyline(latLngs, {
+        color: strokeColor,
+        weight: 4.5,
+        opacity: 0.92,
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(layerGroup);
+
+      // Invisible wider touch buffer (22px) for easy mobile tapping
+      const touchBuffer = L.polyline(latLngs, {
+        color: '#ffffff',
+        weight: 22,
+        opacity: 0.001,
+        lineCap: 'round',
+      }).addTo(layerGroup);
+
+      touchBuffer.on('click', (e: any) => {
+        L.DomEvent.stopPropagation(e);
+        onSelectSegment(seg);
+      });
+    });
+  }, [segments, mapReady, onSelectSegment]);
+
+  // 3. Render Parked Car Section in ELECTRIC BRIGHT BLUE + 🚗 Pin Marker
+  useEffect(() => {
+    if (!mapReady || !parkedLayerRef.current || !leafletModuleRef.current) return;
+    const L = leafletModuleRef.current;
+    const layerGroup = parkedLayerRef.current;
+
+    layerGroup.clearLayers();
 
     if (currentSession && currentSession.isParked && currentSession.session) {
-      const segId = currentSession.session.segmentId;
-      const parkedSeg = segments.find((s) => String(s.id) === String(segId));
+      const session = currentSession.session;
+      const segId = session.segmentId;
 
-      if (parkedSeg && parkedSeg.coordinates && parkedSeg.coordinates.length >= 2) {
-        const latLngs = getOffsetCoordinates(
-          parkedSeg.coordinates,
-          parkedSeg.sideLR || 'L',
-          5.5
-        );
+      // Obtain coordinates directly from session or find in segments
+      let coords = session.coordinates;
+      let sideLR = session.sideLR || session.side_lr || 'L';
 
-        // FeatureGroup holding both outer glow and inner solid bright-blue line
-        const blueLayerGroup = L.featureGroup();
+      if (!coords || coords.length < 2) {
+        const found = segments.find((s) => String(s.id) === String(segId));
+        if (found && found.coordinates) {
+          coords = found.coordinates;
+          sideLR = found.sideLR || sideLR;
+        }
+      }
 
-        // 1. Outer Electric Bright Blue Glow (14px)
+      if (coords && coords.length >= 2) {
+        const latLngs = getOffsetCoordinates(coords, sideLR, 5.5);
+
+        // 1. Outer Electric Bright Blue Halo (14px)
         L.polyline(latLngs, {
           color: '#0066ff',
           weight: 14,
-          opacity: 0.55,
+          opacity: 0.6,
           lineCap: 'round',
           lineJoin: 'round',
-        }).addTo(blueLayerGroup);
+        }).addTo(layerGroup);
 
         // 2. Inner Solid Bright Blue Core (7px)
         L.polyline(latLngs, {
@@ -301,16 +299,13 @@ export default function MapView({
           opacity: 1.0,
           lineCap: 'round',
           lineJoin: 'round',
-        }).addTo(blueLayerGroup);
-
-        blueLayerGroup.addTo(map);
-        parkedLineRef.current = blueLayerGroup;
+        }).addTo(layerGroup);
 
         // Calculate midpoint for the car badge
         const midIdx = Math.floor(latLngs.length / 2);
         const midCoord = latLngs[midIdx];
 
-        // 🚗 High-visibility Parked Car Pin with "Parked Here" label
+        // 🚗 High-visibility Parked Car Pin with "PARKED HERE" badge
         const carIcon = L.divIcon({
           className: 'parked-car-wrapper',
           html: `
@@ -324,21 +319,21 @@ export default function MapView({
           iconAnchor: [22, 22],
         });
 
-        parkedMarkerRef.current = L.marker(midCoord, {
+        L.marker(midCoord, {
           icon: carIcon,
-          zIndexOffset: 2000,
+          zIndexOffset: 2500,
         })
-          .addTo(map)
+          .addTo(layerGroup)
           .bindPopup(
             `<div class="text-xs font-bold text-blue-600">🚗 Your Car is Parked Here</div>` +
-              `<div class="text-[11px] text-slate-900 font-semibold">${currentSession.session.corridor} (${currentSession.session.side} side)</div>` +
+              `<div class="text-[11px] text-slate-900 font-semibold">${session.corridor} (${session.side} side)</div>` +
               `<div class="text-[10px] text-slate-600 mt-0.5">Sweeping: ${currentSession.details?.formattedNextSweeping || ''}</div>`
           );
       }
     }
   }, [currentSession, segments, mapReady]);
 
-  // Highlight selected segment
+  // 4. Highlight Selected Segment
   useEffect(() => {
     if (!mapInstanceRef.current || !leafletModuleRef.current) return;
     const L = leafletModuleRef.current;
@@ -403,10 +398,20 @@ export default function MapView({
   // Center on Parked Car
   const handleCenterOnCar = () => {
     if (!mapInstanceRef.current || !currentSession?.isParked) return;
-    const segId = currentSession.session?.segmentId;
-    const parkedSeg = segments.find((s) => String(s.id) === String(segId));
-    if (parkedSeg && parkedSeg.coordinates && parkedSeg.coordinates.length >= 2) {
-      const latLngs = getOffsetCoordinates(parkedSeg.coordinates, parkedSeg.sideLR || 'L', 5.5);
+    const session = currentSession.session;
+    let coords = session?.coordinates;
+    let sideLR = session?.sideLR || 'L';
+
+    if (!coords || coords.length < 2) {
+      const found = segments.find((s) => String(s.id) === String(session?.segmentId));
+      if (found && found.coordinates) {
+        coords = found.coordinates;
+        sideLR = found.sideLR || sideLR;
+      }
+    }
+
+    if (coords && coords.length >= 2) {
+      const latLngs = getOffsetCoordinates(coords, sideLR, 5.5);
       const midIdx = Math.floor(latLngs.length / 2);
       mapInstanceRef.current.flyTo(latLngs[midIdx], 18, { animate: true, duration: 0.8 });
     }

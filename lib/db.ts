@@ -124,10 +124,12 @@ export async function saveNewParkingSession(
       });
 
       if (error) {
-        console.error('Failed to save to Supabase:', error);
+        console.error('CRITICAL: Failed to save to Supabase:', error.message, error.details, error.hint, error.code);
+      } else {
+        console.log('Successfully saved session to Supabase:', newSession.id);
       }
     } catch (err) {
-      console.error('Supabase save error:', err);
+      console.error('CRITICAL: Supabase exception during save:', err);
     }
   }
 
