@@ -73,10 +73,11 @@ export default function MapView({
   const userMarkerRef = useRef<any>(null);
   const accuracyCircleRef = useRef<any>(null);
   const selectedLineRef = useRef<any>(null);
-  const parkedMarkerRef = useRef<any>(null);
   const parkedLineRef = useRef<any>(null);
+  const parkedMarkerRef = useRef<any>(null);
   const leafletModuleRef = useRef<any>(null);
 
+  const [mapReady, setMapReady] = useState(false);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
@@ -239,6 +240,9 @@ export default function MapView({
           }
         );
       }
+
+      // Signal that map is ready so dependent layers render immediately
+      setMapReady(true);
     });
 
     return () => {
@@ -251,18 +255,19 @@ export default function MapView({
     };
   }, [segments, onSelectSegment]);
 
-  // Render Parked Car Marker and highlight the parked curb
+  // Render Parked Car Marker and highlight the parked curb in BRIGHT ELECTRIC BLUE
   useEffect(() => {
     if (!mapInstanceRef.current || !leafletModuleRef.current) return;
     const L = leafletModuleRef.current;
+    const map = mapInstanceRef.current;
 
     // Clean up previous parked layers
     if (parkedLineRef.current) {
-      mapInstanceRef.current.removeLayer(parkedLineRef.current);
+      map.removeLayer(parkedLineRef.current);
       parkedLineRef.current = null;
     }
     if (parkedMarkerRef.current) {
-      mapInstanceRef.current.removeLayer(parkedMarkerRef.current);
+      map.removeLayer(parkedMarkerRef.current);
       parkedMarkerRef.current = null;
     }
 
@@ -277,18 +282,35 @@ export default function MapView({
           5.5
         );
 
-        // Glowing Cyan curb line for parked spot
-        parkedLineRef.current = L.polyline(latLngs, {
-          color: '#06b6d4',
-          weight: 9,
-          opacity: 0.95,
-          lineCap: 'round',
-        }).addTo(mapInstanceRef.current);
+        // FeatureGroup holding both outer glow and inner solid bright-blue line
+        const blueLayerGroup = L.featureGroup();
 
-        // Calculate midpoint for the car pin
+        // 1. Outer Electric Bright Blue Glow (14px)
+        L.polyline(latLngs, {
+          color: '#0066ff',
+          weight: 14,
+          opacity: 0.55,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }).addTo(blueLayerGroup);
+
+        // 2. Inner Solid Bright Blue Core (7px)
+        L.polyline(latLngs, {
+          color: '#0055ff',
+          weight: 7,
+          opacity: 1.0,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }).addTo(blueLayerGroup);
+
+        blueLayerGroup.addTo(map);
+        parkedLineRef.current = blueLayerGroup;
+
+        // Calculate midpoint for the car badge
         const midIdx = Math.floor(latLngs.length / 2);
         const midCoord = latLngs[midIdx];
 
+        // 🚗 High-visibility Parked Car Pin with "Parked Here" label
         const carIcon = L.divIcon({
           className: 'parked-car-wrapper',
           html: `
@@ -296,24 +318,25 @@ export default function MapView({
               <span class="text-xl leading-none">🚗</span>
               <div class="parked-car-pulse"></div>
             </div>
+            <div class="parked-badge-label">Parked Here</div>
           `,
-          iconSize: [38, 38],
-          iconAnchor: [19, 19],
+          iconSize: [44, 44],
+          iconAnchor: [22, 22],
         });
 
         parkedMarkerRef.current = L.marker(midCoord, {
           icon: carIcon,
-          zIndexOffset: 1200,
+          zIndexOffset: 2000,
         })
-          .addTo(mapInstanceRef.current)
+          .addTo(map)
           .bindPopup(
-            `<div class="text-xs font-bold text-slate-900">🚗 Your Car is Parked Here</div>` +
-              `<div class="text-[11px] text-slate-700 font-semibold">${currentSession.session.corridor} (${currentSession.session.side} side)</div>` +
-              `<div class="text-[10px] text-cyan-800 mt-0.5">Sweeping: ${currentSession.details?.formattedNextSweeping || ''}</div>`
+            `<div class="text-xs font-bold text-blue-600">🚗 Your Car is Parked Here</div>` +
+              `<div class="text-[11px] text-slate-900 font-semibold">${currentSession.session.corridor} (${currentSession.session.side} side)</div>` +
+              `<div class="text-[10px] text-slate-600 mt-0.5">Sweeping: ${currentSession.details?.formattedNextSweeping || ''}</div>`
           );
       }
     }
-  }, [currentSession, segments]);
+  }, [currentSession, segments, mapReady]);
 
   // Highlight selected segment
   useEffect(() => {
@@ -401,7 +424,7 @@ export default function MapView({
           <button
             type="button"
             onClick={handleCenterOnCar}
-            className="w-13 h-13 p-3.5 rounded-2xl bg-cyan-600/95 text-white border border-cyan-400 shadow-2xl backdrop-blur-md active:scale-95 transition-all flex items-center justify-center shadow-cyan-500/30 animate-in fade-in"
+            className="w-13 h-13 p-3.5 rounded-2xl bg-blue-600/95 text-white border border-blue-400 shadow-2xl backdrop-blur-md active:scale-95 transition-all flex items-center justify-center shadow-blue-500/30 animate-in fade-in"
             title="Center on Parked Car"
           >
             <Car className="w-6 h-6" />
@@ -446,6 +469,10 @@ export default function MapView({
       {/* Legend for Urgency */}
       <div className="absolute left-4 bottom-28 z-20 pointer-events-none">
         <div className="bg-slate-900/85 backdrop-blur-md border border-slate-800 rounded-2xl px-3.5 py-2.5 text-[11px] space-y-1.5 shadow-xl">
+          <div className="flex items-center gap-2 text-slate-300">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0" />
+            <span className="font-bold text-blue-400">Parked Spot</span>
+          </div>
           <div className="flex items-center gap-2 text-slate-300">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
             <span>&gt; 48h (Safe)</span>

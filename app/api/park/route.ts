@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     // Defensive: look up segment by segmentId if whole segment object was not passed
     if (!segment && body.segmentId) {
       const all = getSegments();
-      segment = all.find((s) => s.id === body.segmentId)!;
+      segment = all.find((s) => String(s.id) === String(body.segmentId))!;
     }
 
     if (!segment || !segment.id || !segment.weekday) {
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
 
     const newSession = await saveNewParkingSession({
-      segmentId: segment.id,
+      segmentId: String(segment.id),
       corridor: segment.corridor,
       limits: segment.limits,
       side: segment.side,
@@ -60,14 +60,17 @@ export async function POST(req: NextRequest) {
 
     // Send real-time confirmation to Telegram and WhatsApp
     const confirmationMsg =
-      `🚗 *Car Parked!*\n\n` +
-      `📍 *Location:* ${segment.corridor} (${segment.side} side)\n` +
-      `🛣 *Block:* ${segment.limits}\n` +
-      `🧹 *Next Sweeping:* ${sweepingResult.formattedNextSweeping}\n` +
-      `⏰ *12h Reminder:* ${sweepingResult.formattedAlertTime}`;
+      `🚗 <b>Car Parked!</b>\n\n` +
+      `📍 <b>Location:</b> ${segment.corridor} (${segment.side} side)\n` +
+      `🛣 <b>Block:</b> ${segment.limits}\n` +
+      `🧹 <b>Next Sweeping:</b> ${sweepingResult.formattedNextSweeping}\n` +
+      `⏰ <b>12h Reminder:</b> ${sweepingResult.formattedAlertTime}`;
 
-    sendTelegramConfirmation(confirmationMsg).catch((e) => console.error('TG confirm error:', e));
-    sendWhatsAppMessage(confirmationMsg).catch((e) => console.error('WhatsApp confirm error:', e));
+    // Await delivery before serverless shuts down
+    await Promise.allSettled([
+      sendTelegramConfirmation(confirmationMsg),
+      sendWhatsAppMessage(confirmationMsg),
+    ]);
 
     return NextResponse.json({
       success: true,

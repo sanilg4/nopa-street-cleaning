@@ -20,3 +20,6 @@ create table if not exists parking_sessions (
 -- Fast lookup index for active parking and alert checks
 create index if not exists idx_parking_sessions_active 
   on parking_sessions (cleared_at, alert_sent, alert_time);
+
+-- Disable Row Level Security (RLS) so the anon public key can read and write sessions freely
+alter table parking_sessions disable row level security;

@@ -28,9 +28,18 @@ html, body {
 }
 
 /* Marker Wrapper Cleanups */
-.gps-marker-wrapper, .home-marker-wrapper, .parked-car-wrapper {
+.gps-marker-wrapper, .home-marker-wrapper {
   background: transparent !important;
   border: none !important;
+}
+
+.parked-car-wrapper {
+  background: transparent !important;
+  border: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 /* Custom pulsing live location marker */
@@ -60,25 +69,42 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  background: #0891b2;
+  width: 42px;
+  height: 42px;
+  background: #0055ff;
   border-radius: 50%;
-  border: 2.5px solid #ffffff;
-  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.8);
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 18px rgba(0, 85, 255, 0.9);
   position: relative;
   cursor: pointer;
+  z-index: 20;
+}
+
+.parked-badge-label {
+  margin-top: 4px;
+  background: #0055ff;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .parked-car-pulse {
   position: absolute;
   top: -6px;
   left: -6px;
-  width: 46px;
-  height: 46px;
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
-  background: rgba(6, 182, 212, 0.4);
-  animation: pulse 2.2s infinite ease-out;
+  background: rgba(0, 85, 255, 0.45);
+  animation: pulse 2s infinite ease-out;
   pointer-events: none;
 }
 

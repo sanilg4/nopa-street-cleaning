@@ -9,9 +9,11 @@ export async function POST(req: NextRequest) {
     await clearActiveParkingSession();
 
     if (active) {
-      const msg = `🚗 *Car Moved:* Active parking alert for ${active.corridor} has been cleared.`;
-      sendTelegramConfirmation(msg).catch((e) => console.error(e));
-      sendWhatsAppMessage(msg).catch((e) => console.error(e));
+      const msg = `🚗 <b>Car Moved:</b> Active parking alert for ${active.corridor} has been cleared.`;
+      await Promise.allSettled([
+        sendTelegramConfirmation(msg),
+        sendWhatsAppMessage(msg),
+      ]);
     }
 
     return NextResponse.json({ success: true });

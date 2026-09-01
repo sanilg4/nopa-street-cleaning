@@ -37,7 +37,7 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
             ? 'bg-red-950/90 border-red-500/50 shadow-red-500/10'
             : isUrgent
             ? 'bg-amber-950/90 border-amber-500/50 shadow-amber-500/10'
-            : 'bg-slate-900/95 border-cyan-500/40 shadow-cyan-500/10'
+            : 'bg-slate-900/95 border-blue-500/50 shadow-blue-500/20'
         }`}
       >
         <div className="flex items-start justify-between gap-3">
@@ -48,7 +48,7 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
                   ? 'bg-red-500/20 text-red-400'
                   : isUrgent
                   ? 'bg-amber-500/20 text-amber-400'
-                  : 'bg-cyan-500/20 text-cyan-400'
+                  : 'bg-blue-600/20 text-blue-400'
               }`}
             >
               {details.isSweepingNow ? (
