@@ -62,6 +62,40 @@ function getOffsetCoordinates(
   return result;
 }
 
+/**
+ * Calculates the exact geographic midpoint along a polyline (50% of total length).
+ */
+function getPolylineMidpoint(latLngs: [number, number][]): [number, number] {
+  if (!latLngs || latLngs.length === 0) return [0, 0];
+  if (latLngs.length === 1) return latLngs[0];
+  if (latLngs.length === 2) {
+    return [(latLngs[0][0] + latLngs[1][0]) / 2, (latLngs[0][1] + latLngs[1][1]) / 2];
+  }
+
+  let totalDist = 0;
+  const dists: number[] = [];
+  for (let i = 0; i < latLngs.length - 1; i++) {
+    const d = Math.hypot(latLngs[i + 1][0] - latLngs[i][0], latLngs[i + 1][1] - latLngs[i][1]);
+    dists.push(d);
+    totalDist += d;
+  }
+
+  const targetDist = totalDist / 2;
+  let accumulated = 0;
+  for (let i = 0; i < dists.length; i++) {
+    if (accumulated + dists[i] >= targetDist) {
+      const remaining = targetDist - accumulated;
+      const ratio = dists[i] > 0 ? remaining / dists[i] : 0;
+      const lat = latLngs[i][0] + ratio * (latLngs[i + 1][0] - latLngs[i][0]);
+      const lng = latLngs[i][1] + ratio * (latLngs[i + 1][1] - latLngs[i][1]);
+      return [lat, lng];
+    }
+    accumulated += dists[i];
+  }
+
+  return latLngs[Math.floor(latLngs.length / 2)];
+}
+
 export default function MapView({
   segments,
   selectedSegment,
@@ -301,9 +335,8 @@ export default function MapView({
           lineJoin: 'round',
         }).addTo(layerGroup);
 
-        // Calculate midpoint for the car badge
-        const midIdx = Math.floor(latLngs.length / 2);
-        const midCoord = latLngs[midIdx];
+        // Calculate the exact middle of the blue line for the car badge
+        const midCoord = getPolylineMidpoint(latLngs);
 
         // 🚗 High-visibility Parked Car Pin with "PARKED HERE" badge
         const carIcon = L.divIcon({
@@ -412,8 +445,8 @@ export default function MapView({
 
     if (coords && coords.length >= 2) {
       const latLngs = getOffsetCoordinates(coords, sideLR, 5.5);
-      const midIdx = Math.floor(latLngs.length / 2);
-      mapInstanceRef.current.flyTo(latLngs[midIdx], 18, { animate: true, duration: 0.8 });
+      const midCoord = getPolylineMidpoint(latLngs);
+      mapInstanceRef.current.flyTo(midCoord, 18, { animate: true, duration: 0.8 });
     }
   };
 

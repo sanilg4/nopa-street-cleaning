@@ -30,7 +30,10 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
   const isUrgent = details.hoursUntilSweeping !== undefined && details.hoursUntilSweeping <= 12;
 
   return (
-    <div className="absolute top-0 left-0 right-0 z-30 p-4 safe-top pointer-events-none">
+    <div
+      className="absolute top-0 left-0 right-0 z-30 px-4 pb-4 pointer-events-none transition-all duration-300"
+      style={{ paddingTop: 'max(56px, calc(env(safe-area-inset-top) + 20px))' }}
+    >
       <div
         className={`pointer-events-auto rounded-2xl border p-4 shadow-2xl backdrop-blur-md transition-all duration-200 ${
           details.isSweepingNow
