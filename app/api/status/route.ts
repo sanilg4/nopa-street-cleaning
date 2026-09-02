@@ -19,7 +19,11 @@ export async function GET() {
   try {
     const session = await getActiveSession();
     if (!session) {
-      return NextResponse.json({ isParked: false, session: null });
+      return NextResponse.json({
+        isParked: false,
+        session: null,
+        clearedAt: new Date().toISOString(),
+      });
     }
 
     const allSegments = getSegments();

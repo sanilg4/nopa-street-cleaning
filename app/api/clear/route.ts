@@ -16,7 +16,10 @@ export async function POST(req: NextRequest) {
       ]);
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      clearedAt: new Date().toISOString(),
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

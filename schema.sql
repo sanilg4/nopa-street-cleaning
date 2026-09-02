@@ -1,4 +1,5 @@
 -- Supabase PostgreSQL Schema for NOPA Street Cleaning Alerts
+-- Run this in Supabase SQL Editor (supabase.com -> SQL Editor -> New Query)
 
 create table if not exists parking_sessions (
   id text primary key,

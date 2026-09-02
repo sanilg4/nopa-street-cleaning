@@ -51,6 +51,23 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         if (data && data.isParked && data.session) {
+          // Guard against stale server responses overwriting a newer locally confirmed spot
+          const savedStr = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+          if (savedStr) {
+            try {
+              const localSaved = JSON.parse(savedStr);
+              if (
+                localSaved?.isParked &&
+                localSaved.session?.parkedAt &&
+                data.session?.parkedAt &&
+                new Date(data.session.parkedAt).getTime() < new Date(localSaved.session.parkedAt).getTime()
+              ) {
+                // Server returned an older session than what this client just parked; ignore it
+                return;
+              }
+            } catch (e) {}
+          }
+
           setParkingStatus(data);
           if (typeof window !== 'undefined') {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));

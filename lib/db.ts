@@ -29,7 +29,7 @@ function getSupabaseClient() {
   let url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !key) return null;
-  url = url.trim().replace(/\/rest\/v1\/?$/, '');
+  url = url.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
   return createClient(url, key.trim());
 }
 
@@ -37,32 +37,46 @@ export async function getActiveSession(): Promise<ParkingSession | null> {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
+      // Query uncleared sessions ordered by newest parked_at first
       const { data, error } = await supabase
         .from('parking_sessions')
         .select('*')
         .is('cleared_at', null)
         .order('parked_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .limit(5);
 
       if (error) {
-        console.error('Supabase query error:', error);
-      } else if (data) {
+        console.error('Supabase query error:', error.message, error.details);
+      } else if (data && data.length > 0) {
+        // Take the newest active session
+        const activeRow = data[0];
+
+        // Clean up any older lingering active sessions in background
+        if (data.length > 1) {
+          const olderIds = data.slice(1).map((r: any) => r.id);
+          supabase
+            .from('parking_sessions')
+            .update({ cleared_at: new Date().toISOString() })
+            .in('id', olderIds)
+            .then(() => {})
+            .catch(() => {});
+        }
+
         return {
-          id: data.id,
-          segmentId: data.segment_id,
-          corridor: data.corridor,
-          limits: data.limits,
-          side: data.side,
-          weekday: data.weekday,
-          fromHour: data.from_hour,
-          toHour: data.to_hour,
-          sweepingStart: data.sweeping_start,
-          sweepingEnd: data.sweeping_end,
-          alertTime: data.alert_time,
-          alertSent: data.alert_sent,
-          parkedAt: data.parked_at,
-          clearedAt: data.cleared_at,
+          id: activeRow.id,
+          segmentId: activeRow.segment_id,
+          corridor: activeRow.corridor,
+          limits: activeRow.limits,
+          side: activeRow.side,
+          weekday: activeRow.weekday,
+          fromHour: activeRow.from_hour,
+          toHour: activeRow.to_hour,
+          sweepingStart: activeRow.sweeping_start,
+          sweepingEnd: activeRow.sweeping_end,
+          alertTime: activeRow.alert_time,
+          alertSent: activeRow.alert_sent,
+          parkedAt: activeRow.parked_at,
+          clearedAt: activeRow.cleared_at,
         };
       }
     } catch (err) {
@@ -99,14 +113,26 @@ export async function saveNewParkingSession(
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      // First, clear any existing active sessions
-      await supabase
+      // 1. Explicitly clear all existing active sessions by primary key
+      const { data: activeRows } = await supabase
         .from('parking_sessions')
-        .update({ cleared_at: new Date().toISOString() })
+        .select('id')
         .is('cleared_at', null);
 
-      // Insert new session
-      const { error } = await supabase.from('parking_sessions').insert({
+      if (activeRows && activeRows.length > 0) {
+        const ids = activeRows.map((r: any) => r.id);
+        const { error: clearErr } = await supabase
+          .from('parking_sessions')
+          .update({ cleared_at: new Date().toISOString() })
+          .in('id', ids);
+
+        if (clearErr) {
+          console.warn('Supabase clear previous sessions warning:', clearErr.message);
+        }
+      }
+
+      // 2. Insert new session
+      const { error: insertError } = await supabase.from('parking_sessions').insert({
         id: newSession.id,
         segment_id: newSession.segmentId,
         corridor: newSession.corridor,
@@ -123,8 +149,8 @@ export async function saveNewParkingSession(
         cleared_at: null,
       });
 
-      if (error) {
-        console.error('CRITICAL: Failed to save to Supabase:', error.message, error.details, error.hint, error.code);
+      if (insertError) {
+        console.error('CRITICAL: Failed to save to Supabase:', insertError.message, insertError.details, insertError.hint, insertError.code);
       } else {
         console.log('Successfully saved session to Supabase:', newSession.id);
       }
@@ -148,16 +174,25 @@ export async function clearActiveParkingSession(sessionId?: string): Promise<boo
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      let query = supabase
-        .from('parking_sessions')
-        .update({ cleared_at: new Date().toISOString() })
-        .is('cleared_at', null);
-
       if (sessionId) {
-        query = query.eq('id', sessionId);
-      }
+        await supabase
+          .from('parking_sessions')
+          .update({ cleared_at: new Date().toISOString() })
+          .eq('id', sessionId);
+      } else {
+        const { data: activeRows } = await supabase
+          .from('parking_sessions')
+          .select('id')
+          .is('cleared_at', null);
 
-      await query;
+        if (activeRows && activeRows.length > 0) {
+          const ids = activeRows.map((r: any) => r.id);
+          await supabase
+            .from('parking_sessions')
+            .update({ cleared_at: new Date().toISOString() })
+            .in('id', ids);
+        }
+      }
     } catch (err) {
       console.error('Supabase clear error:', err);
     }

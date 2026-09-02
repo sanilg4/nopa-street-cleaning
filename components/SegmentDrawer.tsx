@@ -36,7 +36,7 @@ export default function SegmentDrawer({
   const isCurrentlyParkedHere =
     currentSession &&
     currentSession.isParked &&
-    String(currentSession.session?.segmentId) === String(segment.id);
+    currentSession.session?.segmentId === segment.id;
 
   const handleConfirm = async () => {
     setSubmitting(true);
