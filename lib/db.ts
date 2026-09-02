@@ -54,12 +54,16 @@ export async function getActiveSession(): Promise<ParkingSession | null> {
         // Clean up any older lingering active sessions in background
         if (data.length > 1) {
           const olderIds = data.slice(1).map((r: any) => r.id);
-          supabase
-            .from('parking_sessions')
-            .update({ cleared_at: new Date().toISOString() })
-            .in('id', olderIds)
-            .then(() => {})
-            .catch(() => {});
+          (async () => {
+            try {
+              await supabase
+                .from('parking_sessions')
+                .update({ cleared_at: new Date().toISOString() })
+                .in('id', olderIds);
+            } catch (err) {
+              console.warn('Failed to clean up older sessions:', err);
+            }
+          })();
         }
 
         return {
