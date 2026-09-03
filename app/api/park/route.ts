@@ -7,6 +7,13 @@ import { sendWhatsAppMessage } from '@/lib/whatsapp';
 import fs from 'fs';
 import path from 'path';
 
+export const dynamic = 'force-dynamic';
+
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+  'Pragma': 'no-cache',
+};
+
 let cachedSegments: StreetSegment[] | null = null;
 function getSegments(): StreetSegment[] {
   if (!cachedSegments) {
@@ -20,7 +27,7 @@ function getSegments(): StreetSegment[] {
 
 export async function POST(req: NextRequest) {
   if (!isAuthorized(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_CACHE_HEADERS });
   }
 
   try {
@@ -35,14 +42,14 @@ export async function POST(req: NextRequest) {
 
     if (!segment || !segment.id || !segment.weekday) {
       console.error('Invalid segment data received:', body);
-      return NextResponse.json({ error: 'Invalid segment data' }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid segment data' }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
     const now = new Date();
     const sweepingResult = calculateNextSweeping(segment, now);
 
     if (!sweepingResult) {
-      return NextResponse.json({ error: 'Could not calculate next sweeping window' }, { status: 500 });
+      return NextResponse.json({ error: 'Could not calculate next sweeping window' }, { status: 500, headers: NO_CACHE_HEADERS });
     }
 
     const newSession = await saveNewParkingSession({
@@ -72,13 +79,18 @@ export async function POST(req: NextRequest) {
       sendWhatsAppMessage(confirmationMsg),
     ]);
 
-    return NextResponse.json({
-      success: true,
-      session: newSession,
-      details: sweepingResult,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        session: newSession,
+        details: sweepingResult,
+      },
+      {
+        headers: NO_CACHE_HEADERS,
+      }
+    );
   } catch (err: any) {
     console.error('Error in /api/park:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }

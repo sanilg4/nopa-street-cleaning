@@ -47,48 +47,54 @@ export async function getActiveSession(): Promise<ParkingSession | null> {
 
       if (error) {
         console.error('Supabase query error:', error.message, error.details);
-      } else if (data && data.length > 0) {
-        // Take the newest active session
-        const activeRow = data[0];
+      } else {
+        if (data && data.length > 0) {
+          // Take the newest active session
+          const activeRow = data[0];
 
-        // Clean up any older lingering active sessions in background
-        if (data.length > 1) {
-          const olderIds = data.slice(1).map((r: any) => r.id);
-          (async () => {
-            try {
-              await supabase
-                .from('parking_sessions')
-                .update({ cleared_at: new Date().toISOString() })
-                .in('id', olderIds);
-            } catch (err) {
-              console.warn('Failed to clean up older sessions:', err);
-            }
-          })();
+          // Clean up any older lingering active sessions in background
+          if (data.length > 1) {
+            const olderIds = data.slice(1).map((r: any) => r.id);
+            (async () => {
+              try {
+                await supabase
+                  .from('parking_sessions')
+                  .update({ cleared_at: new Date().toISOString() })
+                  .in('id', olderIds);
+              } catch (err) {
+                console.warn('Failed to clean up older sessions:', err);
+              }
+            })();
+          }
+
+          return {
+            id: activeRow.id,
+            segmentId: activeRow.segment_id,
+            corridor: activeRow.corridor,
+            limits: activeRow.limits,
+            side: activeRow.side,
+            weekday: activeRow.weekday,
+            fromHour: activeRow.from_hour,
+            toHour: activeRow.to_hour,
+            sweepingStart: activeRow.sweeping_start,
+            sweepingEnd: activeRow.sweeping_end,
+            alertTime: activeRow.alert_time,
+            alertSent: activeRow.alert_sent,
+            parkedAt: activeRow.parked_at,
+            clearedAt: activeRow.cleared_at,
+          };
+        } else {
+          // Supabase responded with 0 active sessions: the car is definitely not parked.
+          // Do not fall back to stale /tmp file!
+          return null;
         }
-
-        return {
-          id: activeRow.id,
-          segmentId: activeRow.segment_id,
-          corridor: activeRow.corridor,
-          limits: activeRow.limits,
-          side: activeRow.side,
-          weekday: activeRow.weekday,
-          fromHour: activeRow.from_hour,
-          toHour: activeRow.to_hour,
-          sweepingStart: activeRow.sweeping_start,
-          sweepingEnd: activeRow.sweeping_end,
-          alertTime: activeRow.alert_time,
-          alertSent: activeRow.alert_sent,
-          parkedAt: activeRow.parked_at,
-          clearedAt: activeRow.cleared_at,
-        };
       }
     } catch (err) {
       console.error('Supabase exception:', err);
     }
   }
 
-  // Fallback to local filesystem storage (/tmp in production)
+  // Fallback to local filesystem storage (/tmp in production) ONLY if Supabase is unavailable
   try {
     if (fs.existsSync(LOCAL_STORAGE_PATH)) {
       const content = fs.readFileSync(LOCAL_STORAGE_PATH, 'utf-8');
@@ -108,16 +114,18 @@ export async function saveNewParkingSession(
 ): Promise<ParkingSession> {
   const newSession: ParkingSession = {
     ...session,
-    id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+    id: `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
     alertSent: false,
     parkedAt: new Date().toISOString(),
     clearedAt: null,
   };
 
   const supabase = getSupabaseClient();
+  const nowIso = new Date().toISOString();
+
   if (supabase) {
     try {
-      // 1. Explicitly clear all existing active sessions by primary key
+      // 1. Explicitly clear all existing active sessions
       const { data: activeRows } = await supabase
         .from('parking_sessions')
         .select('id')
@@ -125,15 +133,16 @@ export async function saveNewParkingSession(
 
       if (activeRows && activeRows.length > 0) {
         const ids = activeRows.map((r: any) => r.id);
-        const { error: clearErr } = await supabase
+        await supabase
           .from('parking_sessions')
-          .update({ cleared_at: new Date().toISOString() })
+          .update({ cleared_at: nowIso })
           .in('id', ids);
-
-        if (clearErr) {
-          console.warn('Supabase clear previous sessions warning:', clearErr.message);
-        }
       }
+
+      await supabase
+        .from('parking_sessions')
+        .update({ cleared_at: nowIso })
+        .is('cleared_at', null);
 
       // 2. Insert new session
       const { error: insertError } = await supabase.from('parking_sessions').insert({
@@ -176,12 +185,14 @@ export async function saveNewParkingSession(
 
 export async function clearActiveParkingSession(sessionId?: string): Promise<boolean> {
   const supabase = getSupabaseClient();
+  const nowIso = new Date().toISOString();
+
   if (supabase) {
     try {
       if (sessionId) {
         await supabase
           .from('parking_sessions')
-          .update({ cleared_at: new Date().toISOString() })
+          .update({ cleared_at: nowIso })
           .eq('id', sessionId);
       } else {
         const { data: activeRows } = await supabase
@@ -193,9 +204,14 @@ export async function clearActiveParkingSession(sessionId?: string): Promise<boo
           const ids = activeRows.map((r: any) => r.id);
           await supabase
             .from('parking_sessions')
-            .update({ cleared_at: new Date().toISOString() })
+            .update({ cleared_at: nowIso })
             .in('id', ids);
         }
+
+        await supabase
+          .from('parking_sessions')
+          .update({ cleared_at: nowIso })
+          .is('cleared_at', null);
       }
     } catch (err) {
       console.error('Supabase clear error:', err);
@@ -207,7 +223,7 @@ export async function clearActiveParkingSession(sessionId?: string): Promise<boo
       const content = fs.readFileSync(LOCAL_STORAGE_PATH, 'utf-8');
       const session: ParkingSession = JSON.parse(content);
       if (!sessionId || session.id === sessionId) {
-        session.clearedAt = new Date().toISOString();
+        session.clearedAt = nowIso;
         fs.writeFileSync(LOCAL_STORAGE_PATH, JSON.stringify(session, null, 2));
       }
     }

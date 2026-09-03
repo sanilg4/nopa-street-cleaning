@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import PinGate from '@/components/PinGate';
 import ActiveParkingCard from '@/components/ActiveParkingCard';
@@ -27,6 +27,9 @@ export default function Home() {
   const [parkingStatus, setParkingStatus] = useState<any>(null);
   const [loadingData, setLoadingData] = useState(true);
 
+  // Tracks the timestamp of user actions initiated locally on this specific device
+  const lastLocalActionRef = useRef<number>(0);
+
   // Restore active parking session from localStorage immediately on load
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -44,44 +47,34 @@ export default function Home() {
     }
   }, []);
 
-  // Fetch active parking status from server (Supabase / serverless)
+  // Fetch active parking status from server (Supabase)
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/status');
+      const res = await fetch(`/api/status?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.isParked && data.session) {
-          // Guard against stale server responses overwriting a newer locally confirmed spot
-          const savedStr = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-          if (savedStr) {
-            try {
-              const localSaved = JSON.parse(savedStr);
-              if (
-                localSaved?.isParked &&
-                localSaved.session?.parkedAt &&
-                data.session?.parkedAt &&
-                new Date(data.session.parkedAt).getTime() < new Date(localSaved.session.parkedAt).getTime()
-              ) {
-                // Server returned an older session than what this client just parked; ignore it
-                return;
-              }
-            } catch (e) {}
-          }
 
+        // If this device just performed a local tap within the last 3.5 seconds,
+        // let the optimistic update stay active while the server request finishes.
+        if (Date.now() - lastLocalActionRef.current < 3500) {
+          return;
+        }
+
+        if (data && data.isParked && data.session) {
           setParkingStatus(data);
           if (typeof window !== 'undefined') {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
           }
-        } else if (data && data.isParked === false && data.session === null) {
-          const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              if (data.clearedAt && parsed.session?.parkedAt && new Date(data.clearedAt) > new Date(parsed.session.parkedAt)) {
-                setParkingStatus({ isParked: false, session: null });
-                localStorage.removeItem(STORAGE_KEY);
-              }
-            } catch (e) {}
+        } else if (data && data.isParked === false) {
+          setParkingStatus({ isParked: false, session: null });
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(STORAGE_KEY);
           }
         }
       }
@@ -110,13 +103,34 @@ export default function Home() {
       fetchSegments();
       fetchStatus();
 
-      // Poll status every 15 seconds while page is open to stay synced
-      const interval = setInterval(fetchStatus, 15000);
-      return () => clearInterval(interval);
+      // Poll every 5 seconds for fast live synchronization across devices
+      const interval = setInterval(fetchStatus, 5000);
+
+      // Re-sync immediately when phone unlocks, screen turns on, or user returns to tab
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          fetchStatus();
+        }
+      };
+      const handleFocus = () => {
+        fetchStatus();
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('focus', handleFocus);
+      window.addEventListener('pageshow', handleFocus);
+
+      return () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('focus', handleFocus);
+        window.removeEventListener('pageshow', handleFocus);
+      };
     }
   }, [isAuthenticated, fetchSegments, fetchStatus]);
 
   const handleConfirmPark = async (segment: StreetSegment) => {
+    lastLocalActionRef.current = Date.now();
     const now = new Date();
     const sweeping = calculateNextSweeping(segment, now);
 
@@ -125,7 +139,7 @@ export default function Home() {
     const newStatus = {
       isParked: true,
       session: {
-        id: Date.now().toString(),
+        id: `local_${Date.now()}`,
         segmentId: String(segment.id),
         corridor: segment.corridor,
         limits: segment.limits,
@@ -189,6 +203,8 @@ export default function Home() {
   };
 
   const handleClearParking = async () => {
+    lastLocalActionRef.current = Date.now();
+
     // 1. Instant UI Clear (0ms delay)
     setParkingStatus({ isParked: false, session: null });
     if (typeof window !== 'undefined') {
@@ -199,6 +215,7 @@ export default function Home() {
     // 2. Dispatch to server (clears Supabase & triggers Telegram "Car Moved" alert)
     try {
       await fetch('/api/clear', { method: 'POST' });
+      fetchStatus();
     } catch (err) {
       console.error('Error clearing parking:', err);
     }
