@@ -1,5 +1,5 @@
 import { getActiveSession, markAlertAsSent } from './db';
-import { sendTelegramAlert } from './telegram';
+import { sendTelegramAlert, sendTelegramConfirmation } from './telegram';
 import { sendWhatsAppAlert } from './whatsapp';
 import { resolveSessionTiming } from './sweeping';
 
@@ -10,6 +10,7 @@ export interface AlertCheckResult {
     | 'skipped_short_notice'
     | 'sweeping_already_ended'
     | 'alert_sent'
+    | 'test_sent'
     | 'pending'
     | 'send_failed';
   httpStatus: number;
@@ -122,6 +123,93 @@ export async function runAlertCheck(now: Date = new Date()): Promise<AlertCheckR
       alertScheduledFormatted: timing.formattedAlertTime,
       sweeping: timing.formattedNextSweeping,
       now: now.toISOString(),
+    },
+  };
+}
+
+/**
+ * Read-only Telegram verification check.
+ * Reads the currently saved parking session (if any) without modifying Supabase
+ * or marking alert_sent, and sends a clearly labeled [TEST] message to Telegram.
+ */
+export async function runAlertTestCheck(now: Date = new Date()): Promise<AlertCheckResult> {
+  const session = await getActiveSession();
+
+  if (!session) {
+    const msg =
+      `🧪 <b>[TEST] Street Cleaning Reminder (24h Notice)</b>\n\n` +
+      `No car is currently marked parked in the app right now.\n\n` +
+      `<i>Test check passed! Your Netlify + Telegram 24h reminder pipeline is connected and working.</i>`;
+
+    const tgSent = await sendTelegramConfirmation(msg);
+    if (tgSent) {
+      return {
+        status: 'test_sent',
+        httpStatus: 200,
+        payload: {
+          status: 'test_sent',
+          isParked: false,
+          message: 'Test Telegram message sent (no car currently parked).',
+          channels: { telegram: true },
+        },
+      };
+    }
+
+    return {
+      status: 'send_failed',
+      httpStatus: 500,
+      payload: {
+        error: 'Failed to send test message via Telegram.',
+        isParked: false,
+      },
+    };
+  }
+
+  const timing = resolveSessionTiming(session, now);
+
+  const tgSent = await sendTelegramAlert({
+    corridor: session.corridor,
+    limits: session.limits,
+    side: session.side,
+    formattedNextSweeping: timing.formattedNextSweeping,
+    hoursUntilSweeping: timing.hoursUntilSweeping,
+    sessionId: session.id,
+    noticeHours: timing.noticeHours,
+    isTest: true,
+    formattedAlertTime: timing.formattedAlertTime,
+    alertAlreadySent: session.alertSent,
+    skipAlert: timing.skipAlert,
+  });
+
+  if (tgSent) {
+    return {
+      status: 'test_sent',
+      httpStatus: 200,
+      payload: {
+        status: 'test_sent',
+        isParked: true,
+        readOnly: true,
+        sessionId: session.id,
+        corridor: session.corridor,
+        side: session.side,
+        limits: session.limits,
+        sweeping: timing.formattedNextSweeping,
+        noticeHours: timing.noticeHours,
+        alertScheduledFor: timing.alertTime.toISOString(),
+        alertScheduledFormatted: timing.formattedAlertTime,
+        alertAlreadySent: session.alertSent,
+        channels: { telegram: true },
+      },
+    };
+  }
+
+  return {
+    status: 'send_failed',
+    httpStatus: 500,
+    payload: {
+      error: 'Failed to send test alert via Telegram.',
+      isParked: true,
+      sessionId: session.id,
     },
   };
 }

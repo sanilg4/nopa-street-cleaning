@@ -19,6 +19,10 @@ interface SendAlertOptions {
   hoursUntilSweeping: number;
   sessionId: string;
   noticeHours?: number;
+  isTest?: boolean;
+  formattedAlertTime?: string;
+  alertAlreadySent?: boolean;
+  skipAlert?: boolean;
 }
 
 export async function sendTelegramAlert(options: SendAlertOptions): Promise<boolean> {
@@ -31,34 +35,60 @@ export async function sendTelegramAlert(options: SendAlertOptions): Promise<bool
   }
 
   const noticeLabel = `${options.noticeHours || 24}h Notice`;
-  const text =
-    `🚨 <b>Street Cleaning Reminder (${noticeLabel})</b>\n\n` +
-    `🚗 <b>Car Parked:</b> ${escapeHtml(options.corridor)} (${escapeHtml(options.side)} side)\n` +
-    `📍 <b>Block:</b> ${escapeHtml(options.limits)}\n` +
-    `🧹 <b>Sweeping Window:</b> ${escapeHtml(options.formattedNextSweeping)}\n\n` +
-    `Please move your car before sweeping begins!`;
 
-  const replyMarkup = {
-    inline_keyboard: [
-      [
-        {
-          text: '✅ I Moved the Car',
-          callback_data: `clear_parking:${options.sessionId}`,
-        },
-      ],
-    ],
+  let text: string;
+  if (options.isTest) {
+    let scheduleLine = '';
+    if (options.alertAlreadySent) {
+      scheduleLine = `⏰ <b>Real Reminder Status:</b> Already sent for this parking session\n\n`;
+    } else if (options.skipAlert) {
+      scheduleLine = `⏰ <b>Real Reminder Status:</b> Parked within 12h of sweeping (no separate alert)\n\n`;
+    } else if (options.formattedAlertTime) {
+      scheduleLine = `⏰ <b>Real ${options.noticeHours || 24}h Reminder Scheduled:</b> ${escapeHtml(options.formattedAlertTime)}\n\n`;
+    } else {
+      scheduleLine = '\n';
+    }
+
+    text =
+      `🧪 <b>[TEST] Street Cleaning Reminder (${noticeLabel})</b>\n\n` +
+      `🚗 <b>Car Parked:</b> ${escapeHtml(options.corridor)} (${escapeHtml(options.side)} side)\n` +
+      `📍 <b>Block:</b> ${escapeHtml(options.limits)}\n` +
+      `🧹 <b>Sweeping Window:</b> ${escapeHtml(options.formattedNextSweeping)}\n` +
+      scheduleLine +
+      `<i>Test check passed! Your saved parking spot and real reminder were not changed.</i>`;
+  } else {
+    text =
+      `🚨 <b>Street Cleaning Reminder (${noticeLabel})</b>\n\n` +
+      `🚗 <b>Car Parked:</b> ${escapeHtml(options.corridor)} (${escapeHtml(options.side)} side)\n` +
+      `📍 <b>Block:</b> ${escapeHtml(options.limits)}\n` +
+      `🧹 <b>Sweeping Window:</b> ${escapeHtml(options.formattedNextSweeping)}\n\n` +
+      `Please move your car before sweeping begins!`;
+  }
+
+  const payload: Record<string, any> = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
   };
+
+  if (!options.isTest) {
+    payload.reply_markup = {
+      inline_keyboard: [
+        [
+          {
+            text: '✅ I Moved the Car',
+            callback_data: `clear_parking:${options.sessionId}`,
+          },
+        ],
+      ],
+    };
+  }
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: 'HTML',
-        reply_markup: replyMarkup,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
