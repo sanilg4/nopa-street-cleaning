@@ -63,7 +63,12 @@ export async function POST(req: NextRequest) {
       sweepingStart: sweepingResult.startTime.toISOString(),
       sweepingEnd: sweepingResult.endTime.toISOString(),
       alertTime: sweepingResult.alertTime.toISOString(),
+      alertSent: sweepingResult.skipAlert,
     });
+
+    const reminderLine = sweepingResult.skipAlert
+      ? `⏰ <b>Reminder:</b> Sweeping is within 12h (no extra alert)`
+      : `⏰ <b>${sweepingResult.alertLeadHours}h Reminder:</b> ${sweepingResult.formattedAlertTime}`;
 
     // Send real-time confirmation to Telegram and WhatsApp
     const confirmationMsg =
@@ -71,7 +76,7 @@ export async function POST(req: NextRequest) {
       `📍 <b>Location:</b> ${segment.corridor} (${segment.side} side)\n` +
       `🛣 <b>Block:</b> ${segment.limits}\n` +
       `🧹 <b>Next Sweeping:</b> ${sweepingResult.formattedNextSweeping}\n` +
-      `⏰ <b>12h Reminder:</b> ${sweepingResult.formattedAlertTime}`;
+      reminderLine;
 
     // Await delivery before serverless shuts down
     await Promise.allSettled([

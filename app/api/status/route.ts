@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getActiveSession } from '@/lib/db';
-import { formatTimeRange, StreetSegment } from '@/lib/sweeping';
+import { resolveSessionTiming, StreetSegment } from '@/lib/sweeping';
 import fs from 'fs';
 import path from 'path';
 
@@ -46,20 +46,7 @@ export async function GET(req: Request) {
     const segment = allSegments.find((s) => String(s.id) === String(session.segmentId));
 
     const now = new Date();
-    const sweepingStart = new Date(session.sweepingStart);
-    const sweepingEnd = new Date(session.sweepingEnd);
-    const alertTime = new Date(session.alertTime);
-
-    const hoursUntil = Math.max(
-      0,
-      Math.round((sweepingStart.getTime() - now.getTime()) / (1000 * 60 * 60))
-    );
-
-    const dateOptions: Intl.DateTimeFormatOptions = {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    };
+    const timing = resolveSessionTiming(session, now);
 
     return NextResponse.json(
       {
@@ -70,17 +57,10 @@ export async function GET(req: Request) {
           sideLR: segment?.sideLR || 'L',
         },
         details: {
-          formattedNextSweeping: `${sweepingStart.toLocaleDateString('en-US', dateOptions)} (${formatTimeRange(
-            session.fromHour,
-            session.toHour
-          )})`,
-          formattedAlertTime: alertTime.toLocaleDateString('en-US', {
-            ...dateOptions,
-            hour: 'numeric',
-            minute: '2-digit',
-          }),
-          hoursUntilSweeping: hoursUntil,
-          isSweepingNow: now >= sweepingStart && now <= sweepingEnd,
+          formattedNextSweeping: timing.formattedNextSweeping,
+          formattedAlertTime: timing.formattedAlertTime,
+          hoursUntilSweeping: timing.hoursUntilSweeping,
+          isSweepingNow: timing.isSweepingNow,
         },
       },
       {

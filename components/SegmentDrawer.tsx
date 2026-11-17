@@ -36,7 +36,7 @@ export default function SegmentDrawer({
   const isCurrentlyParkedHere =
     currentSession &&
     currentSession.isParked &&
-    currentSession.session?.segmentId === segment.id;
+    String(currentSession.session?.segmentId) === String(segment.id);
 
   const handleConfirm = async () => {
     setSubmitting(true);
@@ -100,7 +100,7 @@ export default function SegmentDrawer({
             </div>
             <span className="font-bold text-white">
               {segment.fullname} ({segment.fromHour % 12 || 12}
-              {segment.fromHour >= 12 ? 'pm' : 'am'}–{segment.toHour % 12 || 12}
+              {segment.fromHour >= 12 ? 'pm' : 'am'}-{segment.toHour % 12 || 12}
               {segment.toHour >= 12 ? 'pm' : 'am'})
             </span>
           </div>
@@ -126,7 +126,7 @@ export default function SegmentDrawer({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-slate-300">
               <Bell className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>12h Reminder:</span>
+              <span>{sweeping?.alertLeadHours === 12 ? '12h Reminder:' : '24h Reminder:'}</span>
             </div>
             <span className="font-bold text-slate-200">
               {sweeping?.formattedAlertTime}

@@ -16,11 +16,13 @@ interface SendAlertOptions {
   side: string;
   formattedNextSweeping: string;
   hoursUntilSweeping: number;
+  noticeHours?: number;
 }
 
 export async function sendWhatsAppAlert(options: SendAlertOptions): Promise<boolean> {
+  const noticeLabel = `${options.noticeHours || 24}h Notice`;
   const text =
-    `🚨 *Street Cleaning Reminder (12h Notice)*\n\n` +
+    `🚨 *Street Cleaning Reminder (${noticeLabel})*\n\n` +
     `🚗 *Car Parked:* ${options.corridor} (${options.side} side)\n` +
     `📍 *Block:* ${options.limits}\n` +
     `🧹 *Sweeping Window:* ${options.formattedNextSweeping}\n\n` +

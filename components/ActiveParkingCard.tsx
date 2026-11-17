@@ -27,7 +27,7 @@ export default function ActiveParkingCard({ status, onClear }: ActiveParkingCard
     }
   };
 
-  const isUrgent = details.hoursUntilSweeping !== undefined && details.hoursUntilSweeping <= 12;
+  const isUrgent = details.hoursUntilSweeping !== undefined && details.hoursUntilSweeping <= 24;
 
   return (
     <div

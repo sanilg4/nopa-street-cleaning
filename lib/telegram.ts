@@ -18,6 +18,7 @@ interface SendAlertOptions {
   formattedNextSweeping: string;
   hoursUntilSweeping: number;
   sessionId: string;
+  noticeHours?: number;
 }
 
 export async function sendTelegramAlert(options: SendAlertOptions): Promise<boolean> {
@@ -29,8 +30,9 @@ export async function sendTelegramAlert(options: SendAlertOptions): Promise<bool
     return false;
   }
 
+  const noticeLabel = `${options.noticeHours || 24}h Notice`;
   const text =
-    `🚨 <b>Street Cleaning Reminder (12h Notice)</b>\n\n` +
+    `🚨 <b>Street Cleaning Reminder (${noticeLabel})</b>\n\n` +
     `🚗 <b>Car Parked:</b> ${escapeHtml(options.corridor)} (${escapeHtml(options.side)} side)\n` +
     `📍 <b>Block:</b> ${escapeHtml(options.limits)}\n` +
     `🧹 <b>Sweeping Window:</b> ${escapeHtml(options.formattedNextSweeping)}\n\n` +

@@ -110,12 +110,15 @@ export async function getActiveSession(): Promise<ParkingSession | null> {
 }
 
 export async function saveNewParkingSession(
-  session: Omit<ParkingSession, 'id' | 'clearedAt' | 'alertSent' | 'parkedAt'>
+  session: Omit<ParkingSession, 'id' | 'clearedAt' | 'alertSent' | 'parkedAt'> & {
+    alertSent?: boolean;
+  }
 ): Promise<ParkingSession> {
+  const initialAlertSent = Boolean(session.alertSent);
   const newSession: ParkingSession = {
     ...session,
     id: `sess_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-    alertSent: false,
+    alertSent: initialAlertSent,
     parkedAt: new Date().toISOString(),
     clearedAt: null,
   };
@@ -157,7 +160,7 @@ export async function saveNewParkingSession(
         sweeping_start: newSession.sweepingStart,
         sweeping_end: newSession.sweepingEnd,
         alert_time: newSession.alertTime,
-        alert_sent: false,
+        alert_sent: newSession.alertSent,
         parked_at: newSession.parkedAt,
         cleared_at: null,
       });

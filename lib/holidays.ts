@@ -4,12 +4,11 @@
  * (segments where holidays = false).
  */
 
-export function isSfParkingHoliday(date: Date): boolean {
-  const year = date.getFullYear();
-  const month = date.getMonth(); // 0-indexed (0 = Jan, 11 = Dec)
-  const day = date.getDate();
-  const dayOfWeek = date.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
-
+export function isSfParkingHolidayParts(
+  month: number, // 0-indexed (0 = Jan, 11 = Dec)
+  day: number,
+  dayOfWeek: number // 0 = Sun, 1 = Mon, ..., 6 = Sat
+): boolean {
   // 1. Fixed-date holidays
   // New Year's Day (Jan 1)
   if (month === 0 && day === 1) return true;
@@ -49,4 +48,35 @@ export function isSfParkingHoliday(date: Date): boolean {
   if (month === 10 && dayOfWeek === 4 && nthWeekdayOfMonth === 4) return true;
 
   return false;
+}
+
+export function isSfParkingHoliday(date: Date): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  }).formatToParts(date);
+
+  let month0 = 0;
+  let day = 1;
+  let weekdayStr = 'Sun';
+  for (const p of parts) {
+    if (p.type === 'month') month0 = Number(p.value) - 1;
+    if (p.type === 'day') day = Number(p.value);
+    if (p.type === 'weekday') weekdayStr = p.value;
+  }
+
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  const dayOfWeek = weekdayMap[weekdayStr] ?? date.getDay();
+  return isSfParkingHolidayParts(month0, day, dayOfWeek);
 }

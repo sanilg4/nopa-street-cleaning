@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next';
 
 export const metadata: Metadata = {
   title: 'NOPA Parking & Street Cleaning',
-  description: 'Track parked car location and get 12-hour street sweeping reminders in NOPA, San Francisco.',
+  description: 'Track parked car location and get 24-hour street sweeping reminders in NOPA, San Francisco.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
